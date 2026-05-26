@@ -1,0 +1,15 @@
+[build]
+builder = "NIXPACKS"
+
+# The 4 Hour Strategy — runs hourly.
+# Every run: check 1H candles for TP/SL on open positions.
+# At 0h/4h/8h/12h/16h/20h UTC: full 4H signal scan for new entries.
+[[deploy.cronJobs]]
+command = "node bot_crypto_v09.js"
+schedule = "0 * * * *"
+
+# The 15-Minute Day Trading Strategy — BTC/ETH/BNB/XRP universe.
+# EMA21 recapture signal, Asia + US sessions only.
+[[deploy.cronJobs]]
+command = "node bot_daytrading_v01.js"
+schedule = "0,15,30,45 * * * *"

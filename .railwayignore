@@ -1,0 +1,6 @@
+node_modules/
+.env
+*.csv
+backtest_v09_leverage.mjs
+backtest_5min.mjs
+dashboard.js
