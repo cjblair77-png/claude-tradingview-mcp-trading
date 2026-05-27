@@ -127,7 +127,7 @@ function strategyCard(s, prices) {
   const wins = trades.filter(t => (t.pnl || 0) > 0).length;
   const wr = trades.length ? Math.round(wins / trades.length * 100) : null;
 
-  // Open positions rows
+  // ── Open positions: detailed table ─────────────────────────────────────
   const posRows = positions.length ? positions.map(p => {
     const sym = p.symbol;
     const cur = prices[sym];
@@ -135,49 +135,99 @@ function strategyCard(s, prices) {
     const entry = p.entryPrice || p.entry;
     const sl = p.sl;
     const tp = p.tp;
-    let unreal = null;
+    const size = s.key === "v09" ? (p.size || 0) : (p.sizeUSD || 0);
+    const risk = p.risk || p.riskUSD;
+
+    let unreal = null, movePct = null, slDistPct = null, tpDistPct = null, rMult = null;
     if (cur != null) {
       const move = isLong ? (cur - entry) / entry : (entry - cur) / entry;
-      const size = s.key === "v09" ? (p.size || 0) : (p.sizeUSD || 0);
+      movePct = move * 100;
       unreal = move * size;
+      slDistPct = isLong ? (cur - sl) / cur * 100 : (sl - cur) / cur * 100;
+      tpDistPct = isLong ? (tp - cur) / cur * 100 : (cur - tp) / cur * 100;
+      if (risk) rMult = unreal / risk;
     }
+
     const uCls = unreal == null ? "" : unreal >= 0 ? "pos" : "neg";
-    const ageStr = ago(p.entryTime || (p.openedAt ? new Date(p.openedAt).getTime() : null));
-    return `<div class="pos-row ${unreal != null && unreal >= 0 ? 'win' : unreal != null ? 'lose' : ''}">
-      <span class="pos-dir ${isLong?'long':'short'}">${isLong?'▲':'▼'} ${p.direction}</span>
-      <span class="pos-sym">${(sym||'').replace('_USDT','').replace('USDT','')}</span>
-      <span class="pos-entry">@$${fmtPrice(entry)}</span>
-      ${cur != null ? `<span class="pos-cur">→ $${fmtPrice(cur)}</span>` : ''}
-      ${unreal != null ? `<span class="pos-unreal ${uCls}">${fmt$(unreal)}</span>` : '<span class="pos-unreal muted">—</span>'}
-      <span class="pos-sl">SL $${fmtPrice(sl)}</span>
-      <span class="pos-tp">TP $${fmtPrice(tp)}</span>
-      <span class="pos-age">${ageStr}</span>
+    const ageStr = ago(p.entryTime ? new Date(p.entryTime).getTime() : (p.openedAt ? new Date(p.openedAt).getTime() : null));
+    const slLossPct = ((isLong ? (sl - entry) / entry : (entry - sl) / entry) * 100);
+    const tpGainPct = ((isLong ? (tp - entry) / entry : (entry - tp) / entry) * 100);
+    const rr = Math.abs(slLossPct) > 0 ? (tpGainPct / Math.abs(slLossPct)) : null;
+    const signal = p.signal || p.detail || "—";
+
+    return `<div class="pos-card ${unreal != null && unreal >= 0 ? 'win' : unreal != null ? 'lose' : ''}">
+      <div class="pos-top">
+        <span class="pos-dir ${isLong?'long':'short'}">${isLong?'▲ LONG':'▼ SHORT'}</span>
+        <span class="pos-sym">${(sym||'').replace('_USDT','').replace('USDT','')}</span>
+        ${cur != null ? `<span class="pos-pnl ${uCls}">${fmt$(unreal)} ${movePct != null ? `<span class="pos-pct">(${movePct>=0?'+':''}${movePct.toFixed(2)}%)</span>` : ''} ${rMult != null ? `<span class="pos-r">${rMult>=0?'+':''}${rMult.toFixed(2)}R</span>` : ''}</span>` : '<span class="pos-pnl muted">price loading…</span>'}
+        <span class="pos-age">${ageStr}</span>
+      </div>
+      <div class="pos-grid">
+        <div class="pg-cell"><div class="pg-l">Entry</div><div class="pg-v">$${fmtPrice(entry)}</div></div>
+        <div class="pg-cell"><div class="pg-l">Current</div><div class="pg-v ${movePct != null && movePct >= 0 ? 'pos' : movePct != null ? 'neg' : ''}">${cur != null ? '$' + fmtPrice(cur) : '—'}</div></div>
+        <div class="pg-cell"><div class="pg-l">Stop Loss</div><div class="pg-v neg">$${fmtPrice(sl)}<span class="pg-sub">${slDistPct != null ? `${slDistPct.toFixed(2)}% away` : `-${Math.abs(slLossPct).toFixed(2)}%`}</span></div></div>
+        <div class="pg-cell"><div class="pg-l">Take Profit</div><div class="pg-v pos">$${fmtPrice(tp)}<span class="pg-sub">${tpDistPct != null ? `${tpDistPct.toFixed(2)}% away` : `+${tpGainPct.toFixed(2)}%`}</span></div></div>
+        <div class="pg-cell"><div class="pg-l">Size</div><div class="pg-v">$${fmt(size, 0)}</div></div>
+        <div class="pg-cell"><div class="pg-l">Risk</div><div class="pg-v">${risk ? '$' + fmt(risk, 2) : '—'}</div></div>
+        <div class="pg-cell"><div class="pg-l">R:R</div><div class="pg-v">${rr ? '1:' + rr.toFixed(2) : '—'}</div></div>
+        <div class="pg-cell"><div class="pg-l">Signal</div><div class="pg-v signal">${signal.length > 28 ? signal.slice(0,28)+'…' : signal}</div></div>
+      </div>
     </div>`;
   }).join("") : `<div class="no-pos">No open positions</div>`;
 
-  // Pending orders (GP)
+  // ── Pending limit orders: detailed table ───────────────────────────────
   const pendRows = pending.length ? pending.map(p => {
     const isLong = p.direction === "LONG";
-    return `<div class="pos-row pending">
-      <span class="pos-dir ${isLong?'long':'short'}">${isLong?'▲':'▼'} ${p.direction}</span>
-      <span class="pos-sym">${(p.symbol||'').replace('_USDT','').replace('USDT','')}</span>
-      <span class="pos-entry">⏳ Limit @ $${fmtPrice(p.limitPrice)}</span>
-      <span class="pos-sl">SL $${fmtPrice(p.sl)}</span>
-      <span class="pos-tp">TP $${fmtPrice(p.tp)}</span>
-      <span class="pos-age">${ago(p.placedAt)}</span>
+    const cur = prices[p.symbol];
+    const limit = p.limitPrice;
+    const sl = p.sl;
+    const tp = p.tp;
+    const risk = p.riskUSD;
+    const size = p.sizeUSD;
+    const fibInv = p.fibInvalid;
+    const slLossPct = ((isLong ? (sl - limit) / limit : (limit - sl) / limit) * 100);
+    const tpGainPct = ((isLong ? (tp - limit) / limit : (limit - tp) / limit) * 100);
+    const rr = Math.abs(slLossPct) > 0 ? (tpGainPct / Math.abs(slLossPct)) : null;
+    // For LONG: limit is BELOW current. Distance = how far price has to drop to fill.
+    const fillDistPct = cur != null ? (isLong ? (cur - limit) / cur * 100 : (limit - cur) / cur * 100) : null;
+    const placedAgo = ago(p.placedAt);
+    // GP timeout: 24h pending → calculate time remaining
+    const PENDING_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+    const timeRemaining = p.placedAt ? (p.placedAt + PENDING_TIMEOUT_MS - Date.now()) : null;
+    const hrsRemaining = timeRemaining != null ? (timeRemaining / 3600000) : null;
+
+    return `<div class="pos-card pending">
+      <div class="pos-top">
+        <span class="pos-dir ${isLong?'long':'short'}">⏳ ${isLong?'▲ LONG':'▼ SHORT'} LIMIT</span>
+        <span class="pos-sym">${(p.symbol||'').replace('_USDT','').replace('USDT','')}</span>
+        ${fillDistPct != null ? `<span class="pos-fill">Fill ${fillDistPct >= 0 ? 'needs' : 'crossed by'} <strong>${Math.abs(fillDistPct).toFixed(2)}%</strong></span>` : ''}
+        <span class="pos-age">placed ${placedAgo}${hrsRemaining != null ? ` · expires in ${hrsRemaining.toFixed(1)}h` : ''}</span>
+      </div>
+      <div class="pos-grid">
+        <div class="pg-cell"><div class="pg-l">Limit Price</div><div class="pg-v amber">$${fmtPrice(limit)}</div></div>
+        <div class="pg-cell"><div class="pg-l">Current</div><div class="pg-v">${cur != null ? '$' + fmtPrice(cur) : '—'}</div></div>
+        <div class="pg-cell"><div class="pg-l">Stop Loss</div><div class="pg-v neg">$${fmtPrice(sl)}<span class="pg-sub">-${Math.abs(slLossPct).toFixed(2)}%</span></div></div>
+        <div class="pg-cell"><div class="pg-l">Take Profit</div><div class="pg-v pos">$${fmtPrice(tp)}<span class="pg-sub">+${tpGainPct.toFixed(2)}%</span></div></div>
+        <div class="pg-cell"><div class="pg-l">Size</div><div class="pg-v">$${fmt(size, 0)}</div></div>
+        <div class="pg-cell"><div class="pg-l">Risk</div><div class="pg-v">$${fmt(risk, 2)}</div></div>
+        <div class="pg-cell"><div class="pg-l">R:R</div><div class="pg-v">${rr ? '1:' + rr.toFixed(2) : '—'}</div></div>
+        ${fibInv ? `<div class="pg-cell"><div class="pg-l">Fib Invalid</div><div class="pg-v">$${fmtPrice(fibInv)}</div></div>` : '<div class="pg-cell"><div class="pg-l">—</div><div class="pg-v">—</div></div>'}
+      </div>
     </div>`;
   }).join("") : "";
 
-  // Recent trades (last 5)
+  // ── Recent closed trades (last 5) ──────────────────────────────────────
   const recent = trades.slice(-5).reverse();
   const tradeRows = recent.length ? recent.map(t => {
     const sym = (t.symbol || '').replace('_USDT','').replace('USDT','');
     const win = (t.pnl || 0) > 0;
+    const pnlPct = (t.entry && t.exit) ? (((t.direction === 'LONG' ? (t.exit - t.entry) : (t.entry - t.exit)) / t.entry) * 100) : null;
     return `<div class="trade-row ${win?'win':'lose'}">
       <span class="t-dir ${t.direction === 'LONG' ? 'long' : 'short'}">${t.direction === 'LONG' ? '▲' : '▼'}</span>
       <span class="t-sym">${sym}</span>
-      <span class="t-exit">${t.exitReason}</span>
-      <span class="t-pnl ${win?'pos':'neg'}">${fmt$(t.pnl)}</span>
+      <span class="t-prices">${t.entry ? '$' + fmtPrice(t.entry) : ''}${t.exit ? ` → $${fmtPrice(t.exit)}` : ''}</span>
+      <span class="t-exit">${t.exitReason || ''}</span>
+      <span class="t-pnl ${win?'pos':'neg'}">${fmt$(t.pnl)}${pnlPct != null ? ` (${pnlPct>=0?'+':''}${pnlPct.toFixed(2)}%)` : ''}</span>
       <span class="t-time">${t.exitTime ? agoIso(t.exitTime) : ''}</span>
     </div>`;
   }).join("") : `<div class="no-pos">No closed trades yet</div>`;
@@ -211,11 +261,13 @@ async function page() {
   const gist = await fetchGist();
   const strategies = STRATEGIES.map(s => loadStrategy(gist, s));
 
-  // Collect all symbols needing prices
+  // Collect all symbols needing prices (open positions + pending limit orders)
   const allSymbols = new Set();
   for (const s of strategies) {
     const positions = s.account?.openPositions || s.account?.positions || [];
+    const pending   = s.account?.pendingPositions || [];
     for (const p of positions) allSymbols.add(p.symbol);
+    for (const p of pending)   allSymbols.add(p.symbol);
   }
   const prices = await fetchLivePrices([...allSymbols]);
 
@@ -269,55 +321,78 @@ h1{font-size:1rem;color:#fbbf24;letter-spacing:.08em;text-transform:uppercase;fo
 .ps-value.neg{color:#f87171}
 .ps-sub{font-size:.6rem;color:#64748b;display:block;margin-top:2px}
 
-/* Strategy cards grid */
-.strats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
-@media(max-width:1300px){.strats{grid-template-columns:1fr}}
-.strat-card{background:#0b1220;border:1px solid #1a2a42;border-radius:12px;padding:14px;position:relative;overflow:hidden}
-.strat-card.profit::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#16a34a,#22c55e)}
-.strat-card.loss::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#b91c1c,#ef4444)}
+/* Strategy cards — stacked full-width */
+.strats{display:flex;flex-direction:column;gap:18px;max-width:1500px;margin:0 auto}
+.strat-card{background:#0b1220;border:1px solid #1a2a42;border-radius:14px;padding:22px;position:relative;overflow:hidden;box-shadow:0 4px 18px rgba(0,0,0,.3)}
+.strat-card.profit::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,#16a34a,#22c55e)}
+.strat-card.loss::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,#b91c1c,#ef4444)}
 .strat-card.empty{opacity:.6}
-.sc-head{display:flex;align-items:baseline;gap:8px;margin-bottom:10px;flex-wrap:wrap}
-.sc-name{font-size:1.3rem;font-weight:900;color:#fbbf24}
-.sc-sub{font-size:.65rem;color:#64748b;flex:1}
-.sc-lastrun{font-size:.6rem;color:#475569}
-.sc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px}
+.sc-head{display:flex;align-items:baseline;gap:14px;margin-bottom:16px;flex-wrap:wrap;padding-bottom:12px;border-bottom:1px solid #1a2a42}
+.sc-name{font-size:2rem;font-weight:900;color:#fbbf24;letter-spacing:.02em}
+.sc-sub{font-size:.85rem;color:#94a3b8;flex:1}
+.sc-lastrun{font-size:.75rem;color:#64748b}
+.sc-stats{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:14px}
+@media(max-width:1100px){.sc-stats{grid-template-columns:repeat(4,1fr)}}
 @media(max-width:600px){.sc-stats{grid-template-columns:repeat(2,1fr)}}
-.sc-stat{background:#080c14;border-radius:6px;padding:6px 8px;text-align:center}
-.sc-l{font-size:.55rem;color:#475569;text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
-.sc-v{font-size:.78rem;font-weight:700;color:#cbd5e1}
+.sc-stat{background:#080c14;border-radius:8px;padding:10px 12px;text-align:center}
+.sc-l{font-size:.65rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+.sc-v{font-size:1rem;font-weight:700;color:#cbd5e1}
 .sc-v.pos{color:#4ade80}
 .sc-v.neg{color:#f87171}
-.sc-sub2{font-size:.55rem;color:#64748b;font-weight:400}
-.sc-section-label{font-size:.55rem;color:#374151;text-transform:uppercase;letter-spacing:.07em;margin:8px 0 4px}
-.sc-positions,.sc-trades{display:flex;flex-direction:column;gap:3px}
-.pos-row{display:flex;align-items:center;gap:6px;background:#080c14;border-radius:5px;padding:5px 8px;font-size:.62rem;flex-wrap:wrap}
-.pos-row.win{border-left:2px solid #166534}
-.pos-row.lose{border-left:2px solid #7f1d1d}
-.pos-row.pending{border-left:2px solid #d97706;background:#1c1a07}
-.pos-dir{font-weight:800;min-width:56px}
+.sc-sub2{font-size:.7rem;color:#64748b;font-weight:400;display:block;margin-top:2px}
+
+.sc-section-label{font-size:.75rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin:18px 0 8px;font-weight:700;display:flex;align-items:center;gap:8px}
+.sc-section-label::before{content:'';display:inline-block;width:3px;height:14px;background:#fbbf24;border-radius:2px}
+.sc-section-label.pending::before{background:#d97706}
+.sc-section-label.trades::before{background:#475569}
+
+.sc-positions,.sc-trades{display:flex;flex-direction:column;gap:8px}
+
+/* Position card — rich detail */
+.pos-card{background:#080c14;border-radius:8px;padding:12px 14px;border-left:3px solid #334155}
+.pos-card.win{border-left-color:#22c55e}
+.pos-card.lose{border-left-color:#ef4444}
+.pos-card.pending{border-left-color:#d97706;background:#150f06}
+.pos-top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px}
+.pos-dir{font-weight:800;font-size:.85rem;min-width:110px}
 .pos-dir.long{color:#4ade80}
 .pos-dir.short{color:#f87171}
-.pos-sym{font-weight:700;color:#e2e8f0;min-width:34px}
-.pos-entry,.pos-sl,.pos-tp,.pos-age{color:#94a3b8;font-size:.6rem}
-.pos-cur{color:#cbd5e1;font-weight:600}
-.pos-unreal{font-weight:800;font-size:.66rem;margin-left:auto}
-.pos-unreal.pos{color:#4ade80}
-.pos-unreal.neg{color:#f87171}
-.pos-age{margin-left:auto;color:#475569}
-.trade-row{display:flex;align-items:center;gap:6px;background:#080c14;border-radius:5px;padding:4px 8px;font-size:.62rem}
-.trade-row.win{border-left:2px solid #166534}
-.trade-row.lose{border-left:2px solid #7f1d1d}
-.t-dir{font-weight:800;min-width:14px}
+.pos-sym{font-weight:800;color:#fbbf24;font-size:1.1rem;letter-spacing:.02em}
+.pos-pnl{font-weight:800;font-size:1.05rem;margin-left:auto;display:flex;align-items:baseline;gap:6px}
+.pos-pnl.pos{color:#4ade80}
+.pos-pnl.neg{color:#f87171}
+.pos-pct{font-size:.8rem;font-weight:600;opacity:.85}
+.pos-r{font-size:.75rem;background:rgba(255,255,255,.05);padding:2px 6px;border-radius:4px;color:#cbd5e1;font-weight:700}
+.pos-age{color:#64748b;font-size:.7rem;margin-left:auto}
+.pos-fill{color:#fbbf24;font-size:.78rem;margin-left:auto}
+.pos-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}
+@media(max-width:1100px){.pos-grid{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:600px){.pos-grid{grid-template-columns:repeat(2,1fr)}}
+.pg-cell{background:#040810;border-radius:5px;padding:6px 8px}
+.pg-l{font-size:.6rem;color:#475569;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
+.pg-v{font-size:.82rem;font-weight:700;color:#cbd5e1}
+.pg-v.pos{color:#4ade80}
+.pg-v.neg{color:#f87171}
+.pg-v.amber{color:#fbbf24}
+.pg-v.signal{font-size:.65rem;font-weight:500;color:#94a3b8}
+.pg-sub{display:block;font-size:.58rem;color:#64748b;font-weight:500;margin-top:1px}
+
+/* Closed trades list */
+.trade-row{display:flex;align-items:center;gap:10px;background:#080c14;border-radius:6px;padding:8px 12px;font-size:.78rem}
+.trade-row.win{border-left:3px solid #22c55e}
+.trade-row.lose{border-left:3px solid #ef4444}
+.t-dir{font-weight:800;min-width:14px;font-size:.9rem}
 .t-dir.long{color:#4ade80}
 .t-dir.short{color:#f87171}
-.t-sym{font-weight:700;min-width:40px}
-.t-exit{color:#64748b;flex:1}
-.t-pnl{font-weight:700;min-width:60px;text-align:right}
+.t-sym{font-weight:800;color:#fbbf24;min-width:60px}
+.t-prices{color:#cbd5e1;font-size:.72rem;min-width:140px}
+.t-exit{color:#94a3b8;flex:1;font-size:.72rem}
+.t-pnl{font-weight:800;min-width:140px;text-align:right}
 .t-pnl.pos{color:#4ade80}
 .t-pnl.neg{color:#f87171}
-.t-time{color:#374151;font-size:.58rem;margin-left:6px}
-.no-pos{font-size:.62rem;color:#374151;padding:4px}
-.muted{color:#374151;font-size:.7rem;padding:6px}
+.t-time{color:#475569;font-size:.7rem;margin-left:8px;min-width:80px;text-align:right}
+.no-pos{font-size:.85rem;color:#475569;padding:14px;text-align:center;background:#080c14;border-radius:6px;font-style:italic}
+.muted{color:#475569;font-size:.85rem;padding:10px}
 footer{text-align:center;margin-top:14px;font-size:.6rem;color:#1e2d45}
 </style></head>
 <body>
