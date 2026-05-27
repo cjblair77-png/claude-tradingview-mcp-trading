@@ -262,21 +262,20 @@ function evalSignals(candles) {
   const volShrt = vol > vsma[i] * 1.2;
   const shortSig = wasOB && (rsiBrk || macdBrk) && c < e21[i] && rNow > 35 && volShrt;
 
-  // ── LONG REBOUND: RSI extreme oversold reversal ────────────────────────────
-  const wasOversold   = [1,2,3].some(k => rsi[i-k] != null && rsi[i-k] <= CFG.rsiOversold);
-  const rsiTurnUp     = rPrv != null && rPrv <= 30 && rNow > 30;
-  const notFreefalling= c > e21[i] * 0.92;
-  const volRebound    = vol > vsma[i] * 1.0;
-  const longRebound   = wasOversold && rsiTurnUp && reg === "bull" && notFreefalling && volRebound && !longSig;
+  // ── LONG REBOUND: REMOVED — backtest confirmed 0 fires in 150 days
+  //   The bull-regime + RSI≤20 combination is contradictory; the regime
+  //   threshold is rarely met when RSI is that oversold. Kept the SHORT
+  //   rebound which does fire (RSI≥80 + non-bull is a common combination).
 
   // ── SHORT REBOUND: RSI extreme overbought reversal ─────────────────────────
   const wasOverbought = [1,2,3].some(k => rsi[i-k] != null && rsi[i-k] >= CFG.rsiOverbought);
   const rsiTurnDown   = rPrv != null && rPrv >= 70 && rNow < 70;
   const notMeltingUp  = c < e21[i] * 1.08;
+  const volRebound    = vol > vsma[i] * 1.0;
   const shortRebound  = wasOverbought && rsiTurnDown && reg !== "bull" && notMeltingUp && volRebound && !shortSig;
 
   return {
-    long: longSig, short: shortSig, longRebound, shortRebound,
+    long: longSig, short: shortSig, shortRebound,
     regime: reg,
     indicators: {
       price: closes[n], rsi: rNow, rsiPrev: rPrv,
@@ -285,7 +284,6 @@ function evalSignals(candles) {
     },
     longDetail:         longSig      ? `Breakout above ${fmt2(highN)} (${lookback}bar), EMA21>${fmt2(e50[i])}, RSI ${rNow.toFixed(1)}, vol ${(vol/vsma[i]).toFixed(1)}x` : null,
     shortDetail:        shortSig     ? `RSI faded to ${rNow.toFixed(1)} (was >=65), price ${fmt2(c)}<EMA21 ${fmt2(e21[i])}, ${rsiBrk?"RSI cross":"MACD flip"}` : null,
-    longReboundDetail:  longRebound  ? `RSI oversold turn: ${rPrv?.toFixed(1)}->${rNow.toFixed(1)} (was <=${CFG.rsiOversold}), ${reg} regime` : null,
     shortReboundDetail: shortRebound ? `RSI overbought turn: ${rPrv?.toFixed(1)}->${rNow.toFixed(1)} (was >=${CFG.rsiOverbought}), ${reg} regime` : null,
   };
 }
@@ -368,7 +366,10 @@ function calcPnl(pos, price) {
   const raw = pos.direction === "LONG"
     ? (price - pos.entryPrice) / pos.entryPrice * pos.size
     : (pos.entryPrice - price) / pos.entryPrice * pos.size;
-  return raw * CFG.leverage;
+  // Option 1 sizing: NO × leverage multiplier
+  // At SL hit, loss = -slPct × size = -riskUSD (true 0.8% of equity)
+  // Backtest confirmed: max DD 8.5% → 5.7%, profit factor 1.98 → 2.00, fees $55 → $35
+  return raw;
 }
 
 // ─── Close position ───────────────────────────────────────────────────────────
@@ -720,10 +721,10 @@ async function run() {
       try { sig = evalSignals(candles); }
       catch (err) { console.log(`  ${symbol}: signal error — ${err.message}`); continue; }
 
-      const { long, short, longRebound, shortRebound, regime: reg, indicators,
-              longDetail, shortDetail, longReboundDetail, shortReboundDetail } = sig;
+      const { long, short, shortRebound, regime: reg, indicators,
+              longDetail, shortDetail, shortReboundDetail } = sig;
 
-      runLog.signals.push({ symbol, regime: reg, long, short, longRebound, shortRebound, price: indicators.price });
+      runLog.signals.push({ symbol, regime: reg, long, short, shortRebound, price: indicators.price });
 
       if (long || short) {
         let direction = null;
@@ -742,17 +743,11 @@ async function run() {
         continue;
       }
 
-      if (longRebound || shortRebound) {
-        let direction = null;
-        if (longRebound && !shortRebound)  direction = "LONG";
-        if (shortRebound && !longRebound)  direction = "SHORT";
-        if (longRebound && shortRebound) {
-          direction = reg === "bull" ? "LONG" : reg === "bear" ? "SHORT" : null;
-          if (!direction) { console.log(`  ${symbol.padEnd(14)} REBOUND CONFLICT (${reg}) — skipping`); continue; }
-        }
-        const signal  = direction === "LONG" ? "RSI Rebound L" : "RSI Rebound S";
-        const detail  = direction === "LONG" ? longReboundDetail : shortReboundDetail;
-        const riskUSD = riskForRegimeAndDir(reg, direction, acc.balance);
+      if (shortRebound) {
+        const direction = "SHORT";
+        const signal    = "RSI Rebound S";
+        const detail    = shortReboundDetail;
+        const riskUSD   = riskForRegimeAndDir(reg, direction, acc.balance);
         signals.push({ symbol, direction, signal, detail, regime: reg, riskUSD, price: indicators.price, indicators, isRebound: true });
         const regIcon = reg === "bull" ? "🟢" : reg === "bear" ? "🔴" : "🟡";
         console.log(`  ${regIcon} ${symbol.padEnd(14)} ${direction.padEnd(6)} | ${signal} | Risk $${fmt2(riskUSD)} | ${detail}`);

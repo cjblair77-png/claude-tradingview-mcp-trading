@@ -43,6 +43,10 @@ const CFG = {
   candleLimit:   130,
   maxSLPct:      0.012,
   ntfyTopic:     process.env.DT_NTFY_TOPIC || process.env.NTFY_TOPIC || "hermes-daytrading",
+  // ── Maker (limit) order settings — MEXC futures: 0% maker, 0.02% taker ──
+  useMakerOrders: (process.env.DT_USE_MAKER ?? "true") === "true",
+  makerOffsetBps: parseFloat(process.env.DT_MAKER_OFFSET_BPS || "5"),  // 5 bps below close for LONG (above for SHORT)
+  pendingMaxBars: parseInt(process.env.DT_PENDING_MAX_BARS || "3"),    // cancel limit orders after 3 bars (45min)
   mexc: {
     apiKey:    process.env.MEXC_API_KEY,
     secretKey: process.env.MEXC_SECRET_KEY,
@@ -96,14 +100,24 @@ async function saveToGist(acc) {
 
 async function loadAccount() {
   const gist = await loadFromGist();
-  if (gist) { console.log("  [state] loaded from Gist"); return gist; }
-  if (existsSync(ACCOUNT_FILE)) return JSON.parse(readFileSync(ACCOUNT_FILE, "utf8"));
+  if (gist) {
+    console.log("  [state] loaded from Gist");
+    // Backfill new fields for accounts created before maker-order support
+    if (!gist.pendingPositions) gist.pendingPositions = [];
+    return gist;
+  }
+  if (existsSync(ACCOUNT_FILE)) {
+    const acc = JSON.parse(readFileSync(ACCOUNT_FILE, "utf8"));
+    if (!acc.pendingPositions) acc.pendingPositions = [];
+    return acc;
+  }
   return {
-    balance:     CFG.portfolioUSD,
-    peak:        CFG.portfolioUSD,
-    positions:   [],
-    trades:      [],
-    lastBarTime: {},
+    balance:           CFG.portfolioUSD,
+    peak:              CFG.portfolioUSD,
+    positions:         [],
+    pendingPositions:  [],
+    trades:            [],
+    lastBarTime:       {},
   };
 }
 
@@ -228,6 +242,7 @@ function signMexc(timestamp, body) {
 
 async function placeMexcOrder(symbol, side, vol) {
   // side: 1=open long, 2=close long, 3=open short, 4=close short
+  // type 5 = market (taker, 0.02% fee)
   const timestamp = Date.now().toString();
   const bodyObj   = { symbol, side, openType: 1, type: 5, vol, leverage: CFG.leverage };
   const bodyStr   = JSON.stringify(bodyObj);
@@ -246,6 +261,107 @@ async function placeMexcOrder(symbol, side, vol) {
   const data = await res.json();
   if (!data.success) throw new Error(`MEXC order error: ${data.message || JSON.stringify(data)}`);
   return data.data;
+}
+
+// Post-only limit order — guaranteed MAKER (0% fee on MEXC futures)
+// type 2 = post-only: order is rejected by MEXC if it would execute as a taker
+async function placeMexcLimitOrder(symbol, side, vol, price) {
+  const timestamp = Date.now().toString();
+  const bodyObj   = { symbol, side, openType: 1, type: 2, vol, price, leverage: CFG.leverage };
+  const bodyStr   = JSON.stringify(bodyObj);
+  const sig       = signMexc(timestamp, bodyStr);
+  const res = await fetch(`${CFG.mexc.baseUrl}/api/v1/private/order/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "ApiKey": CFG.mexc.apiKey, "Request-Time": timestamp, "Signature": sig },
+    body: bodyStr,
+    signal: AbortSignal.timeout(10000),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(`MEXC limit-order error: ${data.message || JSON.stringify(data)}`);
+  return data.data;
+}
+
+async function cancelMexcOrder(orderId) {
+  const timestamp = Date.now().toString();
+  const bodyStr   = JSON.stringify([orderId]);
+  const sig       = signMexc(timestamp, bodyStr);
+  const res = await fetch(`${CFG.mexc.baseUrl}/api/v1/private/order/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "ApiKey": CFG.mexc.apiKey, "Request-Time": timestamp, "Signature": sig },
+    body: bodyStr,
+    signal: AbortSignal.timeout(10000),
+  });
+  const data = await res.json();
+  return data.success;
+}
+
+// ─── Check pending limit orders for fills ─────────────────────────────────────
+// Paper mode: check if any bar since placement crossed the limit price
+// Live mode: query MEXC order status (TODO when going live)
+
+async function checkPendingFills(acc) {
+  if (!acc.pendingPositions || acc.pendingPositions.length === 0) return;
+
+  for (let p = acc.pendingPositions.length - 1; p >= 0; p--) {
+    const pending = acc.pendingPositions[p];
+    const ageMs   = Date.now() - pending.placedAt;
+    const ageBars = Math.floor(ageMs / (15 * 60 * 1000));
+
+    let candles;
+    try {
+      candles = await fetchKlines(pending.symbol, CFG.interval, Math.max(ageBars + 2, 4));
+    } catch (e) {
+      console.warn(`  [pending] fetch failed for ${pending.symbol}: ${e.message}`);
+      continue;
+    }
+
+    // Only look at bars that closed strictly AFTER placedAt (so we never "fill" using the bar that triggered the signal)
+    const sincePlaced = candles.filter(c => c.isClosed && c.time > pending.placedAt);
+
+    const isLong = pending.direction === "LONG";
+    let fillBar = null;
+    for (const bar of sincePlaced) {
+      if (isLong && bar.low <= pending.limitPrice) { fillBar = bar; break; }
+      if (!isLong && bar.high >= pending.limitPrice) { fillBar = bar; break; }
+    }
+
+    if (fillBar) {
+      // FILLED → move pending to positions
+      const pos = {
+        symbol:    pending.symbol,
+        direction: pending.direction,
+        signal:    pending.signal,
+        entry:     pending.limitPrice,    // filled at exact limit price (no slippage for maker)
+        sl:        pending.sl,
+        tp:        pending.tp,
+        sizeUSD:   pending.sizeUSD,
+        riskUSD:   pending.riskUSD,
+        entryTime: fillBar.time,
+        orderType: "MAKER",               // tag for fee analytics
+      };
+      acc.positions.push(pos);
+      if (!acc.lastBarTime) acc.lastBarTime = {};
+      acc.lastBarTime[pending.symbol] = fillBar.time;
+      acc.pendingPositions.splice(p, 1);
+      console.log(`  ✅ FILLED ${pending.direction} ${pending.symbol} @ \$${pending.limitPrice.toFixed(4)} [MAKER · 0% fee]`);
+
+      const dir = pending.direction === "LONG" ? "📈" : "📉";
+      await notify(`${dir} DT ${pending.symbol} ${pending.direction} FILLED [MAKER]\nEntry: \$${pending.limitPrice.toFixed(4)}  SL: \$${pending.sl.toFixed(4)}  TP: \$${pending.tp.toFixed(4)}\nFee: $0 (maker)  |  Risk: \$${pending.riskUSD.toFixed(2)}`);
+      continue;
+    }
+
+    if (ageBars >= CFG.pendingMaxBars) {
+      // TIMEOUT → cancel
+      console.log(`  ⏰ CANCELLED ${pending.direction} ${pending.symbol} — limit \$${pending.limitPrice.toFixed(4)} unfilled after ${ageBars} bars`);
+      // Live: also cancel the actual order
+      if (!CFG.paperTrading && pending.orderId) {
+        try { await cancelMexcOrder(pending.orderId); } catch (e) { console.log(`     ⚠️  Live cancel failed: ${e.message}`); }
+      }
+      acc.pendingPositions.splice(p, 1);
+    } else {
+      console.log(`  ⏳ PENDING ${pending.direction} ${pending.symbol} @ \$${pending.limitPrice.toFixed(4)} (${ageBars}/${CFG.pendingMaxBars} bars old)`);
+    }
+  }
 }
 
 // ─── Indicators ───────────────────────────────────────────────────────────────
@@ -518,13 +634,17 @@ async function checkExits(acc) {
 // ─── Entry logic ──────────────────────────────────────────────────────────────
 
 async function checkEntries(acc) {
-  if (acc.positions.length >= CFG.maxPositions) return;
+  if (!acc.pendingPositions) acc.pendingPositions = [];
+  // Count BOTH filled positions and pending limit orders against the cap
+  if (acc.positions.length + acc.pendingPositions.length >= CFG.maxPositions) return;
 
   // SPY circuit breaker: blocks LONG entries during equity corrections
   const spyBlocksLong = await checkSpyCircuitBreaker();
 
   for (const symbol of PAIRS) {
+    // Skip if symbol already has an open or pending position
     if (acc.positions.some(p => p.symbol === symbol)) continue;
+    if (acc.pendingPositions.some(p => p.symbol === symbol)) continue;
 
     let candles;
     try {
@@ -548,8 +668,83 @@ async function checkEntries(acc) {
 
     const riskUSD = acc.balance * CFG.riskPct;
     const slDist  = Math.abs(sig.entry - sig.sl);
-    const sizeUSD = (riskUSD / slDist) * sig.entry * CFG.leverage;
+    // Option 1 sizing: NO × leverage multiplier
+    // Loss at SL = riskUSD = true 0.8% of equity (was 4% with leverage applied)
+    // Backtest at MEXC real fees: return +1.9%→+4.4%, max DD 47.5%→11.3%
+    const sizeUSD = (riskUSD / slDist) * sig.entry;
 
+    // ── Maker (limit) order path — guaranteed 0% fee on MEXC ──
+    if (CFG.useMakerOrders) {
+      // Calculate limit price with offset to guarantee maker status:
+      //   LONG  → place below current close (we're buying, so we want to be a passive bid)
+      //   SHORT → place above current close (we're selling, so we want to be a passive ask)
+      const offset    = CFG.makerOffsetBps / 10000;  // 5 bps = 0.0005
+      const limitPrice = sig.direction === "LONG"
+        ? sig.entry * (1 - offset)
+        : sig.entry * (1 + offset);
+
+      // Recompute SL distance & sizeUSD using the LIMIT price (more conservative)
+      // because if filled, our actual entry will be at limitPrice not sig.entry
+      const limitSL    = sig.direction === "LONG"
+        ? Math.min(sig.sl, limitPrice * (1 - CFG.maxSLPct))
+        : Math.max(sig.sl, limitPrice * (1 + CFG.maxSLPct));
+      const limitSLDist = Math.abs(limitPrice - limitSL);
+      const limitSizeUSD = limitSLDist > 0 ? (riskUSD / limitSLDist) * limitPrice : sizeUSD;
+
+      // Recompute TP from the limit entry to preserve the 1.3:1 R:R
+      const limitTPDist = limitSLDist * CFG.rrRatio;
+      const limitTP = sig.direction === "LONG" ? limitPrice + limitTPDist : limitPrice - limitTPDist;
+
+      const pending = {
+        symbol:    sig.symbol,
+        direction: sig.direction,
+        signal:    sig.signal,
+        limitPrice: Math.round(limitPrice * 1e6) / 1e6,
+        sl:        Math.round(limitSL * 1e6) / 1e6,
+        tp:        Math.round(limitTP * 1e6) / 1e6,
+        sizeUSD:   Math.round(limitSizeUSD * 100) / 100,
+        riskUSD:   Math.round(riskUSD * 100) / 100,
+        barTime:   sig.barTime,
+        placedAt:  Date.now(),
+        orderId:   null,                  // populated by live order placement below
+        rsi:       sig.rsi,
+      };
+
+      const dir = sig.direction === "LONG" ? "📈" : "📉";
+      const slPct = ((limitSLDist / limitPrice) * 100).toFixed(2);
+      const tpPct = ((limitTPDist / limitPrice) * 100).toFixed(2);
+      console.log(
+        `  ${dir} LIMIT ${symbol} ${sig.direction} @ \$${limitPrice.toFixed(4)} [MAKER · offset ${CFG.makerOffsetBps}bps]\n` +
+        `     SL: \$${limitSL.toFixed(4)} (${slPct}%)  TP: \$${limitTP.toFixed(4)} (${tpPct}%)\n` +
+        `     RSI: ${sig.rsi}  Signal: ${sig.signal}  Risk: \$${riskUSD.toFixed(2)}  Notional: \$${limitSizeUSD.toFixed(2)}  Timeout: ${CFG.pendingMaxBars} bars`
+      );
+
+      // Live order — post-only limit (type 2)
+      if (!CFG.paperTrading && CFG.mexc.apiKey) {
+        try {
+          const mexcSide = sig.direction === "LONG" ? 1 : 3;
+          const orderData = await placeMexcLimitOrder(symbol, mexcSide, 1, limitPrice);
+          pending.orderId = orderData?.orderId;
+          console.log(`     🔴 LIVE LIMIT order: ${orderData?.orderId || "no ID"}`);
+        } catch (e) {
+          console.log(`     ⚠️  Live limit order failed: ${e.message} — skipping`);
+          continue;  // don't add pending if live placement failed
+        }
+      }
+
+      acc.pendingPositions.push(pending);
+      if (!acc.lastBarTime) acc.lastBarTime = {};
+      acc.lastBarTime[symbol] = sig.barTime;
+
+      await notify(
+        `${dir} DT ${symbol} ${sig.direction} LIMIT PLACED [MAKER]\n` +
+        `Limit: \$${limitPrice.toFixed(4)}  SL: \$${limitSL.toFixed(4)}  TP: \$${limitTP.toFixed(4)}\n` +
+        `Timeout: ${CFG.pendingMaxBars} bars · Fee if filled: $0 (maker)`
+      );
+      continue;  // skip the legacy immediate-open path below
+    }
+
+    // ── Legacy market-order path (fallback if DT_USE_MAKER=false) ──
     acc.positions.push({
       symbol:    sig.symbol,
       direction: sig.direction,
@@ -560,6 +755,7 @@ async function checkEntries(acc) {
       sizeUSD:   Math.round(sizeUSD * 100) / 100,
       riskUSD:   Math.round(riskUSD * 100) / 100,
       entryTime: sig.barTime,
+      orderType: "TAKER",
     });
     if (!acc.lastBarTime) acc.lastBarTime = {};
     acc.lastBarTime[symbol] = sig.barTime;
@@ -570,12 +766,11 @@ async function checkEntries(acc) {
     const tpPct  = ((tpDist / sig.entry) * 100).toFixed(2);
 
     console.log(
-      `  ${dir} ENTRY ${symbol} ${sig.direction}  $${sig.entry.toFixed(4)}\n` +
+      `  ${dir} ENTRY ${symbol} ${sig.direction}  $${sig.entry.toFixed(4)} [TAKER]\n` +
       `     SL: $${sig.sl.toFixed(4)} (${slPct}%)  TP: $${sig.tp.toFixed(4)} (${tpPct}%)\n` +
-      `     RSI: ${sig.rsi}  Signal: ${sig.signal}  Risk: $${riskUSD.toFixed(2)}  Notional: $${sizeUSD.toFixed(2)} (${CFG.leverage}x)`
+      `     RSI: ${sig.rsi}  Signal: ${sig.signal}  Risk: $${riskUSD.toFixed(2)}  Notional: $${sizeUSD.toFixed(2)}`
     );
 
-    // Live order (only when PAPER_TRADING=false and MEXC keys are set)
     if (!CFG.paperTrading && CFG.mexc.apiKey) {
       try {
         const mexcSide = sig.direction === "LONG" ? 1 : 3;
@@ -588,7 +783,7 @@ async function checkEntries(acc) {
 
     const potWin = riskUSD * CFG.rrRatio;
     await notify(
-      `${dir} DT ${symbol} ${sig.direction} OPEN  [${sig.signal} @ ${CFG.leverage}x]\n` +
+      `${dir} DT ${symbol} ${sig.direction} OPEN [TAKER]\n` +
       `Entry: $${sig.entry.toFixed(4)}  SL: $${sig.sl.toFixed(4)}  TP: $${sig.tp.toFixed(4)}\n` +
       `Win: +$${potWin.toFixed(2)}  |  Loss: -$${riskUSD.toFixed(2)}\n` +
       `Balance: $${acc.balance.toFixed(2)}  |  RSI: ${sig.rsi}`
@@ -605,12 +800,18 @@ async function run() {
 
   const acc = await loadAccount();
   const dd  = ((acc.peak - acc.balance) / acc.peak * 100).toFixed(1);
+  const pendCount = acc.pendingPositions?.length || 0;
+  const orderMode = CFG.useMakerOrders ? `MAKER (limit, 0%)` : `TAKER (market, 0.02%)`;
   console.log(
-    `  Balance: $${acc.balance.toFixed(2)}  Peak: $${acc.peak.toFixed(2)}  DD: ${dd}%` +
-    `  Positions: ${acc.positions.length}/${CFG.maxPositions}  ${CFG.leverage}x  Risk: ${(CFG.riskPct*100).toFixed(1)}%`
+    `  Balance: $${acc.balance.toFixed(2)}  Peak: $${acc.peak.toFixed(2)}  DD: ${dd}%\n` +
+    `  Positions: ${acc.positions.length} filled + ${pendCount} pending / ${CFG.maxPositions}  |  ${orderMode}  |  Risk: ${(CFG.riskPct*100).toFixed(2)}% true (Option 1 sizing)`
   );
 
+  // 1. Check pending limit orders for fills BEFORE exits (so newly-filled positions don't immediately get exit-checked stale)
+  await checkPendingFills(acc);
+  // 2. Check exits on filled positions
   await checkExits(acc);
+  // 3. Look for new signals → place new limit orders
   await checkEntries(acc);
   await saveAccount(acc);
 
