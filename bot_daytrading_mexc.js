@@ -26,9 +26,10 @@ import crypto from "crypto";
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 // MEXC symbol format: BASE_USDT (underscore separator)
-const PAIRS = ["BTC_USDT", "BNB_USDT", "XRP_USDT", "SUI_USDT", "LTC_USDT", "AVAX_USDT"];
+// Added ETH + SOL (2026-05) to cover bull-thesis majors
+const PAIRS = ["BTC_USDT", "ETH_USDT", "SOL_USDT", "BNB_USDT", "XRP_USDT", "SUI_USDT", "LTC_USDT", "AVAX_USDT"];
 
-// EMA50 bounce signal only validated for BTC and SUI
+// EMA50 bounce signal only validated for BTC and SUI (keep narrow until ETH/SOL prove out)
 const EMA50_PAIRS = new Set(["BTC_USDT", "SUI_USDT"]);
 
 const CFG = {
@@ -36,7 +37,7 @@ const CFG = {
   portfolioUSD:  parseFloat(process.env.DT_PORTFOLIO_USD || "1000"),
   riskPct:       parseFloat(process.env.DT_RISK_PCT      || "0.008"),  // 0.8% risk per trade
   leverage:      parseFloat(process.env.DT_LEVERAGE      || "5"),      // 5x leverage
-  maxPositions:  6,
+  maxPositions:  8,  // raised from 6 → 8 to fit ETH+SOL additions
   // ── Optimized from 6-month sweep — was R:R=1.3, Hold=12 (+4.4% return) ──
   // New: R:R=2.0, Hold=18 (+27% return at same risk)
   rrRatio:       2.0,
