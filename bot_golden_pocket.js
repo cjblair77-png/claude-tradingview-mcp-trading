@@ -64,6 +64,8 @@ const CFG = {
   interval:           "Min15",
   candleLimit:        200,
   ntfyTopic:          process.env.GP_NTFY_TOPIC || "hermes-goldenpocket",
+  summaryTopic:       process.env.SUMMARY_NTFY_TOPIC || "hermes-summary",
+  summaryIntervalHrs: parseFloat(process.env.SUMMARY_INTERVAL_HRS || "2"),
   mexc: {
     apiKey:    process.env.MEXC_API_KEY,
     secretKey: process.env.MEXC_SECRET_KEY,
@@ -551,6 +553,89 @@ async function checkEntries(acc) {
   }
 }
 
+// ─── Portfolio Summary (every N hours) ─────────────────────────────────────
+// Loads all 3 strategy accounts from the Gist and pushes a P&L summary to
+// your phone. Throttled by acc.lastSummary timestamp.
+
+async function fetchGistFile(filename) {
+  if (!GIST_ID || !GITHUB_TOKEN) return null;
+  try {
+    const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+      headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await res.json();
+    const file = data.files?.[filename];
+    if (!file) return null;
+    return JSON.parse(file.content);
+  } catch { return null; }
+}
+
+async function sendPortfolioSummary() {
+  const v09 = await fetchGistFile("paper_account_v09.json");
+  const dt  = await fetchGistFile("paper_daytrading_v01.json");
+  const gp  = await fetchGistFile("paper_account_golden_pocket.json");
+
+  const fmt$ = n => (n >= 0 ? "+" : "") + "$" + Math.abs(n).toFixed(2);
+
+  function summarize(name, acc, defaultStart) {
+    if (!acc) return `\n${name}: (no data)`;
+    const start = acc.startBalance ?? defaultStart;
+    const bal = acc.balance ?? start;
+    const realized = bal - start;
+    const realizedPct = start > 0 ? (realized / start * 100) : 0;
+    const positions = acc.openPositions || acc.positions || [];
+    const pending = acc.pendingPositions || [];
+    const trades = acc.closedTrades || acc.trades || [];
+    const wins = trades.filter(t => (t.pnl || 0) > 0).length;
+    const wr = trades.length ? Math.round(wins / trades.length * 100) : "—";
+    return `\n${name}: $${bal.toFixed(0)} (${realizedPct >= 0 ? '+' : ''}${realizedPct.toFixed(1)}%) · ${trades.length}t ${wr}%WR · ${positions.length}open ${pending.length}pend`;
+  }
+
+  function openList(name, acc) {
+    if (!acc) return "";
+    const positions = acc.openPositions || acc.positions || [];
+    if (!positions.length) return "";
+    let s = `\n\n${name} open:`;
+    for (const p of positions) {
+      const sym = (p.symbol || "").replace("_USDT", "").replace("USDT", "");
+      const entry = p.entryPrice || p.entry;
+      s += `\n  ${p.direction === "LONG" ? "▲" : "▼"} ${sym} @$${entry?.toFixed(4)} (SL $${p.sl?.toFixed(4)} / TP $${p.tp?.toFixed(4)})`;
+    }
+    return s;
+  }
+
+  const v09Bal = v09?.balance ?? 13750;
+  const dtBal  = dt?.balance  ?? 2500;
+  const gpBal  = gp?.balance  ?? CFG.portfolioUSD;
+  const v09Start = v09?.startBalance ?? 13750;
+  const dtStart  = dt?.startBalance  ?? 2500;
+  const gpStart  = gp?.startBalance  ?? CFG.portfolioUSD;
+  const totalStart = v09Start + dtStart + gpStart;
+  const totalBal = v09Bal + dtBal + gpBal;
+  const totalPnL = totalBal - totalStart;
+  const totalPct = totalStart > 0 ? (totalPnL / totalStart * 100) : 0;
+
+  let body = `Portfolio: $${totalBal.toFixed(0)} (${fmt$(totalPnL)}, ${totalPct >= 0 ? "+" : ""}${totalPct.toFixed(2)}%)`;
+  body += summarize("v09", v09, 13750);
+  body += summarize("DT", dt, 2500);
+  body += summarize("GP", gp, CFG.portfolioUSD);
+  body += openList("v09", v09);
+  body += openList("DT", dt);
+  body += openList("GP", gp);
+
+  try {
+    await fetch(`https://ntfy.sh/${CFG.summaryTopic}`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain", "Title": "📊 " + CFG.summaryIntervalHrs + "h Portfolio Summary" },
+      body, signal: AbortSignal.timeout(8000),
+    });
+    console.log(`  📊 Sent ${CFG.summaryIntervalHrs}h summary to ntfy/${CFG.summaryTopic}`);
+  } catch (e) {
+    console.log(`  ⚠️  Summary push failed: ${e.message}`);
+  }
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function run() {
@@ -572,6 +657,13 @@ async function run() {
   await checkExits(acc);
   // 3. Look for new entries (impulse detection)
   await checkEntries(acc);
+  // 4. Portfolio summary push (throttled — every N hours)
+  const summaryIntervalMs = CFG.summaryIntervalHrs * 3600 * 1000;
+  const lastSummary = acc.lastSummary || 0;
+  if (Date.now() - lastSummary > summaryIntervalMs) {
+    await sendPortfolioSummary();
+    acc.lastSummary = Date.now();
+  }
   // Save
   await saveAccount(acc);
 
