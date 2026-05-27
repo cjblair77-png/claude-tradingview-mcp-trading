@@ -52,18 +52,20 @@ const CFG = {
   interval:          "Hour4",    // MEXC format for 4H (NOT Min240 — that returns Parameter error)
   interval1h:        "Min60",    // MEXC format for 1H exit checks
   candleLimit:       550,        // 500 + buffer for 200 EMA + 30-bar lookback
-  slPct:             parseFloat(process.env.SL_PCT              || "0.065"),  // 6.5%
-  tpPct:             parseFloat(process.env.TP_PCT              || "0.23"),   // 23%
-  trailPct:          parseFloat(process.env.TRAIL_PCT           || "0.19"),   // 19%
+  // ── Path A optimized params (from 6-month sweep, +75% return improvement) ──
+  // Was: SL 6.5% / TP 23% / Trail 19% / RSI 54-65 / Lookback 30
+  slPct:             parseFloat(process.env.SL_PCT              || "0.04"),   // tighter SL
+  tpPct:             parseFloat(process.env.TP_PCT              || "0.35"),   // bigger TP — R:R 8.8:1
+  trailPct:          parseFloat(process.env.TRAIL_PCT           || "0.16"),   // slightly tighter
   trailMode:         (process.env.TRAIL_MODE                    || "auto").toLowerCase(),
-  trailAutoBullPct:  parseFloat(process.env.TRAIL_AUTO_BULL_PCT || "90"),
-  reboundSlPct:      parseFloat(process.env.REBOUND_SL_PCT      || "0.035"), // 3.5%
-  reboundTpPct:      parseFloat(process.env.REBOUND_TP_PCT      || "0.22"),  // 22%
+  trailAutoBullPct:  parseFloat(process.env.TRAIL_AUTO_BULL_PCT || "60"),
+  reboundSlPct:      parseFloat(process.env.REBOUND_SL_PCT      || "0.035"),
+  reboundTpPct:      parseFloat(process.env.REBOUND_TP_PCT      || "0.22"),
   rsiOversold:       parseFloat(process.env.RSI_OVERSOLD        || "20"),
   rsiOverbought:     parseFloat(process.env.RSI_OVERBOUGHT      || "80"),
-  breakoutRsiMin:    parseFloat(process.env.BREAKOUT_RSI_MIN    || "54"),
+  breakoutRsiMin:    parseFloat(process.env.BREAKOUT_RSI_MIN    || "48"),    // widened from 54
   breakoutRsiMax:    parseFloat(process.env.BREAKOUT_RSI_MAX    || "65"),
-  breakoutLookback:  parseInt(process.env.BREAKOUT_LOOKBACK     || "30"),
+  breakoutLookback:  parseInt(process.env.BREAKOUT_LOOKBACK     || "15"),    // tightened from 30
   mexc: {
     apiKey:    process.env.MEXC_API_KEY,
     secretKey: process.env.MEXC_SECRET_KEY,

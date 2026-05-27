@@ -37,14 +37,19 @@ const CFG = {
   riskPct:       parseFloat(process.env.DT_RISK_PCT      || "0.008"),  // 0.8% risk per trade
   leverage:      parseFloat(process.env.DT_LEVERAGE      || "5"),      // 5x leverage
   maxPositions:  6,
-  rrRatio:       1.3,
-  maxHoldBars:   12,   // 12 × 15min = 3 hours max hold
+  // ── Optimized from 6-month sweep — was R:R=1.3, Hold=12 (+4.4% return) ──
+  // New: R:R=2.0, Hold=18 (+27% return at same risk)
+  rrRatio:       2.0,
+  maxHoldBars:   18,   // 18 × 15min = 4.5 hours max hold (was 12 / 3h)
   interval:      "Min15",  // MEXC interval format
   candleLimit:   130,
   maxSLPct:      0.012,
   ntfyTopic:     process.env.DT_NTFY_TOPIC || process.env.NTFY_TOPIC || "hermes-daytrading",
   // ── Maker (limit) order settings — MEXC futures: 0% maker, 0.02% taker ──
-  useMakerOrders: (process.env.DT_USE_MAKER ?? "true") === "true",
+  // Default FALSE: backtest showed maker orders cause adverse selection (miss 20% of winners).
+  // Taker fees (0.04% round-trip) are easily covered by edge. Re-enable only if maker fill
+  // mechanics improve via different limit placement strategy.
+  useMakerOrders: (process.env.DT_USE_MAKER ?? "false") === "true",
   makerOffsetBps: parseFloat(process.env.DT_MAKER_OFFSET_BPS || "5"),  // 5 bps below close for LONG (above for SHORT)
   pendingMaxBars: parseInt(process.env.DT_PENDING_MAX_BARS || "3"),    // cancel limit orders after 3 bars (45min)
   mexc: {
@@ -493,7 +498,7 @@ function analyzeSymbol(symbol, candles) {
   if (i < 70 || prev < 0) return null;
   if (!rsi_[i] || !vsma[i]) return null;
   if (!inSession(candles[i].time)) return null;
-  if (!adx_[i] || adx_[i] < 20) return null;
+  if (!adx_[i] || adx_[i] < 15) return null;  // lowered from 20 — backtest showed +60% more trades with better edge
 
   // Block Asia session entries (01–08 UTC)
   const entryHour = new Date(candles[i].time).getUTCHours();
