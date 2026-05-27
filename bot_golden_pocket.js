@@ -627,7 +627,7 @@ async function sendPortfolioSummary() {
   try {
     await fetch(`https://ntfy.sh/${CFG.summaryTopic}`, {
       method: "POST",
-      headers: { "Content-Type": "text/plain", "Title": "📊 " + CFG.summaryIntervalHrs + "h Portfolio Summary" },
+      headers: { "Content-Type": "text/plain", "Title": CFG.summaryIntervalHrs + "h Portfolio Summary" },
       body, signal: AbortSignal.timeout(8000),
     });
     console.log(`  📊 Sent ${CFG.summaryIntervalHrs}h summary to ntfy/${CFG.summaryTopic}`);
