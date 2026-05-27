@@ -49,7 +49,7 @@ const CFG = {
   minRisk:           parseFloat(process.env.MIN_RISK_USD        || "2"),
   maxPositions:      parseInt(process.env.MAX_POSITIONS         || "10"),
   leverage:          parseFloat(process.env.LEVERAGE            || "1.5"),
-  interval:          "Min240",   // MEXC format for 4H
+  interval:          "Hour4",    // MEXC format for 4H (NOT Min240 — that returns Parameter error)
   interval1h:        "Min60",    // MEXC format for 1H exit checks
   candleLimit:       550,        // 500 + buffer for 200 EMA + 30-bar lookback
   slPct:             parseFloat(process.env.SL_PCT              || "0.065"),  // 6.5%
@@ -377,7 +377,9 @@ function closeTrade(acc, pos, price, reason, closed) {
   const pnl = calcPnl(pos, price);
   const won = pnl > 0;
 
-  acc.balance += pos.size + pnl;
+  // Balance only reflects realized P&L (pnl is already leverage-adjusted)
+  // Was: acc.balance += pos.size + pnl  — that inflated balance by (size - riskUSD) every close
+  acc.balance += pnl;
   acc.stats.total++;
   acc.stats.pnl += pnl;
   acc.stats.pnl  = parseFloat(acc.stats.pnl.toFixed(4));
@@ -508,7 +510,8 @@ function openPosition(acc, symbol, direction, entryPrice, signal, detail, reg, r
   const sl      = isLong ? entryPrice * (1 - slPct) : entryPrice * (1 + slPct);
   const tp      = isLong ? entryPrice * (1 + tpPct) : entryPrice * (1 - tpPct);
 
-  acc.balance -= riskUSD;
+  // Note: balance is NOT debited on open — paper account tracks realized P&L only
+  // (was: acc.balance -= riskUSD — paired with the inflated close, both removed for correctness)
 
   const pos = {
     id:         `P9M-${Date.now()}-${symbol}`,

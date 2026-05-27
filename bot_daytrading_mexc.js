@@ -194,7 +194,7 @@ async function checkSpyCircuitBreaker() {
   try {
     const endSec   = Math.floor(Date.now() / 1000);
     const startSec = endSec - 60 * 4 * 3600;  // 60 × 4H bars back
-    const url = `${CFG.mexc.baseUrl}/api/v1/contract/kline/QQQSTOCK_USDT?interval=Min240&start=${startSec}&end=${endSec}`;
+    const url = `${CFG.mexc.baseUrl}/api/v1/contract/kline/QQQSTOCK_USDT?interval=Hour4&start=${startSec}&end=${endSec}`;
     const res  = await fetch(url, { signal: AbortSignal.timeout(12000) });
     const json = await res.json();
     if (!json.data?.close || json.data.close.length < 55) {
