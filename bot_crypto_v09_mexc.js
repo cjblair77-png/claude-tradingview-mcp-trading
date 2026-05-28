@@ -66,6 +66,17 @@ const CFG = {
   breakoutRsiMin:    parseFloat(process.env.BREAKOUT_RSI_MIN    || "48"),    // widened from 54
   breakoutRsiMax:    parseFloat(process.env.BREAKOUT_RSI_MAX    || "65"),
   breakoutLookback:  parseInt(process.env.BREAKOUT_LOOKBACK     || "15"),    // tightened from 30
+  // ── Momentum-breakdown SHORT (walk-forward validated 3/4 windows, avg PF 1.66) ──
+  // Mirror of long breakout: break below N-bar low + downtrend + RSI 35-52 + vol.
+  // Bear-gated (per-coin regime) + macro-gated (regime monitor) + capped at maxShorts.
+  // Captures high-beta alt dumps; auto-dormant in bull markets.
+  momoShortEnabled:  process.env.MOMO_SHORT_ENABLED !== "false",            // default ON
+  momoShortRsiMin:   parseFloat(process.env.MOMO_SHORT_RSI_MIN  || "35"),
+  momoShortRsiMax:   parseFloat(process.env.MOMO_SHORT_RSI_MAX  || "52"),
+  momoShortVolMult:  parseFloat(process.env.MOMO_SHORT_VOL_MULT || "1.5"),
+  momoShortSlPct:    parseFloat(process.env.MOMO_SHORT_SL_PCT   || "0.04"),  // 4% SL
+  momoShortTpPct:    parseFloat(process.env.MOMO_SHORT_TP_PCT   || "0.10"),  // 10% TP (downside is fast)
+  maxShorts:         parseInt(process.env.MAX_SHORTS            || "3"),     // cap concurrent shorts (anti-squeeze)
   mexc: {
     apiKey:    process.env.MEXC_API_KEY,
     secretKey: process.env.MEXC_SECRET_KEY,
@@ -276,17 +287,29 @@ function evalSignals(candles) {
   const volRebound    = vol > vsma[i] * 1.0;
   const shortRebound  = wasOverbought && rsiTurnDown && reg !== "bull" && notMeltingUp && volRebound && !shortSig;
 
+  // ── MOMENTUM-BREAKDOWN SHORT: mirror of the long breakout (bear-gated) ─────
+  //   break below N-bar low + downtrend (EMA21<EMA50 falling) + RSI 35-52 + vol.
+  //   Walk-forward validated: 3/4 windows, avg PF 1.66. Only fires in bear regime.
+  const lowN          = Math.min(...closes.slice(Math.max(0, i - lookback), i));
+  const trendDown     = e21[i] < e50[i] && e21[i] < e21[i-1] && e21[i-1] < e21[i-3];
+  const breakdownMomo = c < lowN;
+  const rsiShortMomo  = rNow >= CFG.momoShortRsiMin && rNow <= CFG.momoShortRsiMax;
+  const volShortMomo  = vol > vsma[i] * CFG.momoShortVolMult;
+  const momoShort     = CFG.momoShortEnabled && reg === "bear" && breakdownMomo && trendDown &&
+                        rsiShortMomo && volShortMomo && !shortSig && !shortRebound;
+
   return {
-    long: longSig, short: shortSig, shortRebound,
+    long: longSig, short: shortSig, shortRebound, momoShort,
     regime: reg,
     indicators: {
       price: closes[n], rsi: rNow, rsiPrev: rPrv,
       e21: e21[i], e50: e50[i], e200: e200[i],
-      macdHist: mc.hist[i], highN, vol, volSma: vsma[i],
+      macdHist: mc.hist[i], highN, lowN, vol, volSma: vsma[i],
     },
     longDetail:         longSig      ? `Breakout above ${fmt2(highN)} (${lookback}bar), EMA21>${fmt2(e50[i])}, RSI ${rNow.toFixed(1)}, vol ${(vol/vsma[i]).toFixed(1)}x` : null,
     shortDetail:        shortSig     ? `RSI faded to ${rNow.toFixed(1)} (was >=65), price ${fmt2(c)}<EMA21 ${fmt2(e21[i])}, ${rsiBrk?"RSI cross":"MACD flip"}` : null,
     shortReboundDetail: shortRebound ? `RSI overbought turn: ${rPrv?.toFixed(1)}->${rNow.toFixed(1)} (was >=${CFG.rsiOverbought}), ${reg} regime` : null,
+    momoShortDetail:    momoShort    ? `Breakdown below ${fmt2(lowN)} (${lookback}bar), EMA21<${fmt2(e50[i])} falling, RSI ${rNow.toFixed(1)}, vol ${(vol/vsma[i]).toFixed(1)}x` : null,
   };
 }
 
@@ -330,6 +353,34 @@ async function saveToGist(acc) {
     console.log("  ☁️  Account saved to GitHub Gist");
   } catch (e) {
     console.log(`  ⚠️  Gist save failed: ${e.message}`);
+  }
+}
+
+// ─── Macro regime gate (reads the regime monitor's shared Gist state) ─────────
+// Returns true if momentum SHORTS are allowed. Blocks shorts when BTC macro
+// regime has turned bullish (Golden Cross OR weekly EMA10>20) — this is the
+// W4-squeeze protection: shorts shut down decisively when a bull confirms.
+async function macroShortsAllowed() {
+  if (!GIST_ID || !GITHUB_TOKEN) return true;  // no gate available → allow
+  try {
+    const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+      headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await res.json();
+    const file = data.files?.["regime_state.json"];
+    if (!file) return true;  // regime monitor hasn't run yet → allow
+    const st = JSON.parse(file.content);
+    const macroBull = !!(st?.daily?.ema50_gt_200 || st?.weekly?.ema10_gt_20);
+    if (macroBull) {
+      console.log(`  🟢 Macro regime BULLISH (golden cross or weekly bull) — momentum shorts DISABLED`);
+      return false;
+    }
+    console.log(`  🔴 Macro regime not bullish — momentum shorts ENABLED`);
+    return true;
+  } catch (e) {
+    console.log(`  ⚠️  Macro regime check failed: ${e.message} — defaulting to allow shorts`);
+    return true;
   }
 }
 
@@ -715,6 +766,9 @@ async function run() {
     console.log("\n── Signals ─────────────────────────────────────────────────────\n");
     const signals = [];
 
+    // Macro regime gate for momentum shorts (W4-squeeze protection)
+    const shortsAllowed = CFG.momoShortEnabled ? await macroShortsAllowed() : false;
+
     for (const symbol of PAIRS) {
       const candles = marketData[symbol];
       if (!candles) continue;
@@ -723,10 +777,10 @@ async function run() {
       try { sig = evalSignals(candles); }
       catch (err) { console.log(`  ${symbol}: signal error — ${err.message}`); continue; }
 
-      const { long, short, shortRebound, regime: reg, indicators,
-              longDetail, shortDetail, shortReboundDetail } = sig;
+      const { long, short, shortRebound, momoShort, regime: reg, indicators,
+              longDetail, shortDetail, shortReboundDetail, momoShortDetail } = sig;
 
-      runLog.signals.push({ symbol, regime: reg, long, short, shortRebound, price: indicators.price });
+      runLog.signals.push({ symbol, regime: reg, long, short, shortRebound, momoShort, price: indicators.price });
 
       if (long || short) {
         let direction = null;
@@ -753,6 +807,17 @@ async function run() {
         signals.push({ symbol, direction, signal, detail, regime: reg, riskUSD, price: indicators.price, indicators, isRebound: true });
         const regIcon = reg === "bull" ? "🟢" : reg === "bear" ? "🔴" : "🟡";
         console.log(`  ${regIcon} ${symbol.padEnd(14)} ${direction.padEnd(6)} | ${signal} | Risk $${fmt2(riskUSD)} | ${detail}`);
+        continue;
+      }
+
+      // Momentum-breakdown short (bear-gated per-coin + macro-gated + capped at open time)
+      if (momoShort && shortsAllowed) {
+        const direction = "SHORT";
+        const signal    = "Momentum Breakdown";
+        const detail    = momoShortDetail;
+        const riskUSD   = riskForRegimeAndDir(reg, direction, acc.balance);
+        signals.push({ symbol, direction, signal, detail, regime: reg, riskUSD, price: indicators.price, indicators, isMomoShort: true });
+        console.log(`  🔻 ${symbol.padEnd(14)} ${direction.padEnd(6)} | ${signal} | Risk $${fmt2(riskUSD)} | ${detail}`);
       }
     }
 
@@ -785,15 +850,25 @@ async function run() {
         console.log(`  ${sig.symbol.padEnd(14)} already open — skipping`);
         continue;
       }
+      // Cap concurrent shorts (anti-squeeze): count all open shorts, block new ones past maxShorts
+      if (sig.direction === "SHORT") {
+        const openShorts = acc.openPositions.filter(p => p.direction === "SHORT").length;
+        if (openShorts >= CFG.maxShorts) {
+          console.log(`  ${sig.symbol.padEnd(14)} SHORT — max ${CFG.maxShorts} concurrent shorts reached, skipping`);
+          continue;
+        }
+      }
       const entryPrice  = sig.price;
       const reboundOpts = sig.isRebound
         ? { slPct: CFG.reboundSlPct, tpPct: CFG.reboundTpPct, noTrail: true }
+        : sig.isMomoShort
+        ? { slPct: CFG.momoShortSlPct, tpPct: CFG.momoShortTpPct, noTrail: true }
         : { noTrail: !useTrail };
       const pos = openPosition(acc, sig.symbol, sig.direction, entryPrice, sig.signal, sig.detail, sig.regime, sig.riskUSD, reboundOpts);
       if (!pos) continue;
 
       const icon      = sig.direction === "LONG" ? "🟢" : "🔴";
-      const typeLabel = sig.isRebound ? "REBOUND" : "MOMENTUM";
+      const typeLabel = sig.isRebound ? "REBOUND" : sig.isMomoShort ? "MOMO-SHORT" : "MOMENTUM";
       console.log(`  ${icon} ${sig.direction.padEnd(6)} ${sig.symbol.padEnd(14)} @ $${fmt2(entryPrice)} [${typeLabel}] [${CFG.leverage}x]`);
       console.log(`     Risk $${fmt2(sig.riskUSD)} | SL $${fmt2(pos.sl)} | TP $${fmt2(pos.tp)} | ${sig.regime}`);
       console.log(`     ${sig.detail}`);
