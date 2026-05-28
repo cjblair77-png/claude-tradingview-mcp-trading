@@ -123,8 +123,8 @@ async function main(){
   // how many majors agree with the basket direction. STRONG confluence =
   // all 3 windows same direction with 4-5/5 majors aligned in each.
   const WINDOWS = [{label:"30m",bars:2},{label:"60m",bars:4},{label:"90m",bars:6}];
-  const m15 = {};
-  for(const sym of MAJORS){ const b=await klines(sym,"Min15",60); await sleep(60); if(b&&b.length>10) m15[sym]=b.map(x=>x.c); }
+  const m15 = {}, m15v = {};
+  for(const sym of MAJORS){ const b=await klines(sym,"Min15",60); await sleep(60); if(b&&b.length>10){ m15[sym]=b.map(x=>x.c); m15v[sym]=b.map(x=>x.v); } }
   const mtf = WINDOWS.map(w=>{
     let sum=0, n=0, down=0, up=0;
     for(const sym of MAJORS){
@@ -150,6 +150,23 @@ async function main(){
   // 30m basket move for fast-move detection
   const fastMovePct = mtf[0]?.avg ?? 0;
 
+  // ── Volume confirmation (proxy: recent vol vs 20-bar avg per major) ─────
+  // Candle vol isn't directional, but a move on surging vol = conviction.
+  // Combined with confluence direction, that's volume-confirmed.
+  let volSurging=0, volRatios=[];
+  for(const sym of MAJORS){
+    const v=m15v[sym]; if(!v||v.length<22) continue;
+    const recent=(v[v.length-1]+v[v.length-2])/2;            // last 30m
+    const base=v.slice(-22,-2).reduce((a,b)=>a+b,0)/20;      // prior 20 bars
+    if(base>0){ const ratio=recent/base; volRatios.push(ratio); if(ratio>=1.5) volSurging++; }
+  }
+  const avgVolRatio = volRatios.length ? volRatios.reduce((a,b)=>a+b,0)/volRatios.length : 1;
+  const volConfirmed = volSurging>=3;   // majority of majors surging
+  // Conviction read: STRONG confluence + volume = high conviction
+  const conviction = (confTier==="STRONG" && volConfirmed) ? "HIGH CONVICTION"
+                   : (confTier==="STRONG" && !volConfirmed) ? "STRONG but LIGHT VOLUME (watch for exhaustion)"
+                   : null;
+
   // ── Decide run type: full 6h report, or quick alert-on-change ───────────
   const minUTC = new Date().getUTCMinutes();
   const fullReport = (hourUTC % 6 === 0) && minUTC < 30;   // 00/06/12/18 UTC
@@ -167,6 +184,8 @@ async function main(){
   H.push(`== MTF CONFLUENCE (majors 30/60/90m) ==`);
   H.push(confTier==="NONE" ? `MIXED - timeframes not aligned` : `${confDir} - ${confTier} (min ${minAgree}/5 agree)`);
   for(const w of mtf) H.push(`${w.label}: ${pct(w.avg)} (${w.agree}/${w.n} ${arrowM(w.dir)})`);
+  H.push(`Volume: ${volConfirmed?"CONFIRMED":"light"} (${volSurging}/5 surging, ${avgVolRatio.toFixed(1)}x avg)`);
+  if(conviction) H.push(`=> ${conviction}`);
   H.push("");
   H.push(`== MAJORS BREADTH (4H) ==`);
   H.push(`${aligned}/5 ${breadthDir} (${breadthLabel})`);
