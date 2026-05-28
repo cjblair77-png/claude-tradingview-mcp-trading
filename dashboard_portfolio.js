@@ -221,11 +221,14 @@ function strategyCard(s, prices) {
   const tradeRows = recent.length ? recent.map(t => {
     const sym = (t.symbol || '').replace('_USDT','').replace('USDT','');
     const win = (t.pnl || 0) > 0;
-    const pnlPct = (t.entry && t.exit) ? (((t.direction === 'LONG' ? (t.exit - t.entry) : (t.entry - t.exit)) / t.entry) * 100) : null;
+    // v09 uses entryPrice/exitPrice; DT and GP use entry/exit
+    const entry = t.entry ?? t.entryPrice;
+    const exit  = t.exit  ?? t.exitPrice;
+    const pnlPct = (entry && exit) ? (((t.direction === 'LONG' ? (exit - entry) : (entry - exit)) / entry) * 100) : null;
     return `<div class="trade-row ${win?'win':'lose'}">
       <span class="t-dir ${t.direction === 'LONG' ? 'long' : 'short'}">${t.direction === 'LONG' ? '▲' : '▼'}</span>
       <span class="t-sym">${sym}</span>
-      <span class="t-prices">${t.entry ? '$' + fmtPrice(t.entry) : ''}${t.exit ? ` → $${fmtPrice(t.exit)}` : ''}</span>
+      <span class="t-prices">${entry ? '$' + fmtPrice(entry) : ''}${exit ? ` → $${fmtPrice(exit)}` : ''}</span>
       <span class="t-exit">${t.exitReason || ''}</span>
       <span class="t-pnl ${win?'pos':'neg'}">${fmt$(t.pnl)}${pnlPct != null ? ` (${pnlPct>=0?'+':''}${pnlPct.toFixed(2)}%)` : ''}</span>
       <span class="t-time">${t.exitTime ? agoIso(t.exitTime) : ''}</span>
@@ -296,6 +299,47 @@ async function page() {
 
   const now = new Date().toLocaleTimeString();
   const cards = strategies.map(s => strategyCard(s, prices)).join("\n");
+
+  // ── Build COMBINED recent trades (all 3 strategies, newest first) ──────
+  const allTrades = [];
+  for (const s of strategies) {
+    if (!s.account) continue;
+    const ts = s.account.closedTrades || s.account.trades || [];
+    for (const t of ts) {
+      allTrades.push({ ...t, _strategy: s.name, _key: s.key });
+    }
+  }
+  // Sort by exitTime descending (newest first)
+  allTrades.sort((a, b) => {
+    const ta = a.exitTime ? new Date(a.exitTime).getTime() : 0;
+    const tb = b.exitTime ? new Date(b.exitTime).getTime() : 0;
+    return tb - ta;
+  });
+  const combinedRecent = allTrades.slice(0, 15);
+
+  const combinedRows = combinedRecent.length ? combinedRecent.map(t => {
+    const sym = (t.symbol || '').replace('_USDT','').replace('USDT','');
+    const win = (t.pnl || 0) > 0;
+    const entry = t.entry ?? t.entryPrice;
+    const exit  = t.exit  ?? t.exitPrice;
+    const pnlPct = (entry && exit) ? (((t.direction === 'LONG' ? (exit - entry) : (entry - exit)) / entry) * 100) : null;
+    const badgeClass = t._key === 'v09' ? 'badge-v09' : t._key === 'dt' ? 'badge-dt' : 'badge-gp';
+    return `<div class="trade-row ${win?'win':'lose'}">
+      <span class="t-badge ${badgeClass}">${t._strategy}</span>
+      <span class="t-dir ${t.direction === 'LONG' ? 'long' : 'short'}">${t.direction === 'LONG' ? '▲' : '▼'}</span>
+      <span class="t-sym">${sym}</span>
+      <span class="t-prices">${entry ? '$' + fmtPrice(entry) : ''}${exit ? ` → $${fmtPrice(exit)}` : ''}</span>
+      <span class="t-exit">${t.exitReason || ''}</span>
+      <span class="t-pnl ${win?'pos':'neg'}">${fmt$(t.pnl)}${pnlPct != null ? ` (${pnlPct>=0?'+':''}${pnlPct.toFixed(2)}%)` : ''}</span>
+      <span class="t-time">${t.exitTime ? agoIso(t.exitTime) : ''}</span>
+    </div>`;
+  }).join("") : `<div class="no-pos">No trades closed across any strategy yet</div>`;
+
+  // Combined stats
+  const combinedWins = allTrades.filter(t => (t.pnl || 0) > 0).length;
+  const combinedLosses = allTrades.filter(t => (t.pnl || 0) <= 0).length;
+  const combinedWR = allTrades.length ? Math.round(combinedWins / allTrades.length * 100) : 0;
+  const combinedNet = allTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
 
   return `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta http-equiv="refresh" content="30">
@@ -393,6 +437,25 @@ h1{font-size:1rem;color:#fbbf24;letter-spacing:.08em;text-transform:uppercase;fo
 .t-time{color:#475569;font-size:.7rem;margin-left:8px;min-width:80px;text-align:right}
 .no-pos{font-size:.85rem;color:#475569;padding:14px;text-align:center;background:#080c14;border-radius:6px;font-style:italic}
 .muted{color:#475569;font-size:.85rem;padding:10px}
+
+/* Combined trades section (all 3 strategies merged) */
+.combined-section{max-width:1500px;margin:18px auto 0;background:#0b1220;border:1px solid #1a2a42;border-radius:14px;padding:22px;box-shadow:0 4px 18px rgba(0,0,0,.3);position:relative;overflow:hidden}
+.combined-section::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,#3b82f6,#8b5cf6,#ec4899)}
+.cs-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #1a2a42}
+.cs-title{font-size:1.15rem;font-weight:900;color:#a78bfa;letter-spacing:.04em}
+.cs-stats{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.cs-stat{font-size:.78rem;color:#94a3b8;background:#080c14;padding:5px 11px;border-radius:6px;font-weight:600}
+.cs-stat.pos{color:#4ade80}
+.cs-stat.neg{color:#f87171}
+.cs-trades{display:flex;flex-direction:column;gap:6px}
+.cs-foot{text-align:center;margin-top:10px;font-size:.7rem;color:#475569;font-style:italic}
+
+/* Strategy badge inside combined trades */
+.t-badge{font-weight:800;font-size:.65rem;padding:3px 8px;border-radius:4px;min-width:42px;text-align:center;letter-spacing:.05em;text-transform:uppercase}
+.badge-v09{background:rgba(251,191,36,.15);color:#fbbf24;border:1px solid rgba(251,191,36,.3)}
+.badge-dt{background:rgba(59,130,246,.15);color:#60a5fa;border:1px solid rgba(59,130,246,.3)}
+.badge-gp{background:rgba(167,139,250,.15);color:#a78bfa;border:1px solid rgba(167,139,250,.3)}
+
 footer{text-align:center;margin-top:14px;font-size:.6rem;color:#1e2d45}
 </style></head>
 <body>
@@ -417,6 +480,20 @@ footer{text-align:center;margin-top:14px;font-size:.6rem;color:#1e2d45}
 </div>
 
 <div class="strats">${cards}</div>
+
+<div class="combined-section">
+  <div class="cs-head">
+    <span class="cs-title">📜 ALL RECENT TRADES (COMBINED)</span>
+    <span class="cs-stats">
+      <span class="cs-stat">${allTrades.length} total</span>
+      <span class="cs-stat">${combinedWins}W / ${combinedLosses}L</span>
+      <span class="cs-stat">${combinedWR}% WR</span>
+      <span class="cs-stat ${combinedNet >= 0 ? 'pos' : 'neg'}">${fmt$(combinedNet)} net</span>
+    </span>
+  </div>
+  <div class="cs-trades">${combinedRows}</div>
+  <div class="cs-foot">Showing last ${Math.min(15, allTrades.length)} of ${allTrades.length} closed trades · newest first</div>
+</div>
 
 <footer>PAPER TRADING · v09 + DT + GP · MEXC Futures · Live prices from Binance · State from GitHub Gist · Refreshes every 30s</footer>
 </body></html>`;
