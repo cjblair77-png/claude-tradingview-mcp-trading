@@ -74,6 +74,15 @@ function ago(ms) {
 }
 function agoIso(iso) { if (!iso) return "never"; return ago(new Date(iso).getTime()); }
 
+// Estimated round-trip fee for an open position, so unrealized P&L shows NET.
+// v09 = taker market orders; DT = taker unless maker-tagged; GP = maker (0%).
+function posFee(key, p) {
+  const size = key === "v09" ? (p.size || 0) : (p.sizeUSD || 0);
+  if (key === "gp") return p.orderType === "TAKER" ? size * 0.0004 : 0;
+  if (key === "dt") return p.orderType === "MAKER" ? 0 : size * 0.0004;
+  return size * 0.0004; // v09 taker
+}
+
 function loadStrategy(gist, st) {
   const f = gist?.files?.[st.file];
   if (!f) return { ...st, account: null };
@@ -118,6 +127,7 @@ function strategyCard(s, prices) {
       const move = isLong ? (cur - p.entry) / p.entry : (p.entry - cur) / p.entry;
       unreal = move * (p.sizeUSD || 0);
     }
+    unreal -= posFee(s.key, p);  // net of estimated round-trip fee
     totalUnreal += unreal;
   }
   const equity = balance + totalUnreal;
@@ -142,7 +152,7 @@ function strategyCard(s, prices) {
     if (cur != null) {
       const move = isLong ? (cur - entry) / entry : (entry - cur) / entry;
       movePct = move * 100;
-      unreal = move * size;
+      unreal = move * size - posFee(s.key, p);  // net of estimated round-trip fee
       slDistPct = isLong ? (cur - sl) / cur * 100 : (sl - cur) / cur * 100;
       tpDistPct = isLong ? (tp - cur) / cur * 100 : (cur - tp) / cur * 100;
       if (risk) rMult = unreal / risk;
@@ -290,7 +300,7 @@ async function page() {
       const entry = p.entryPrice || p.entry;
       const size = s.key === "v09" ? (p.size || 0) : (p.sizeUSD || 0);
       const move = isLong ? (cur - entry) / entry : (entry - cur) / entry;
-      totalUnreal += move * size;
+      totalUnreal += move * size - posFee(s.key, p);  // net of estimated round-trip fee
     }
   }
   const totalEquity = totalBalance + totalUnreal;

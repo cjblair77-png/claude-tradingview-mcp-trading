@@ -77,12 +77,15 @@ const CFG = {
   momoShortSlPct:    parseFloat(process.env.MOMO_SHORT_SL_PCT   || "0.04"),  // 4% SL
   momoShortTpPct:    parseFloat(process.env.MOMO_SHORT_TP_PCT   || "0.10"),  // 10% TP (downside is fast)
   maxShorts:         parseInt(process.env.MAX_SHORTS            || "3"),     // cap concurrent shorts (anti-squeeze)
+  takerFeeRoundtrip: parseFloat(process.env.TAKER_FEE_ROUNDTRIP || "0.0004"),// 0.02% per side × 2 (MEXC taker)
   mexc: {
     apiKey:    process.env.MEXC_API_KEY,
     secretKey: process.env.MEXC_SECRET_KEY,
     baseUrl:   "https://futures.mexc.com",
   },
 };
+
+const FEE_ROUNDTRIP = CFG.takerFeeRoundtrip;  // round-trip taker fee (v09 uses market orders)
 
 const DATA_DIR     = process.env.RAILWAY_ENVIRONMENT ? "/data" : ".";
 if (process.env.RAILWAY_ENVIRONMENT) mkdirSync(DATA_DIR, { recursive: true });
@@ -428,10 +431,14 @@ function calcPnl(pos, price) {
 // ─── Close position ───────────────────────────────────────────────────────────
 
 function closeTrade(acc, pos, price, reason, closed) {
-  const pnl = calcPnl(pos, price);
+  const gross = calcPnl(pos, price);
+  // Net of fees: v09 uses taker market orders (0.02% per side = 0.04% round-trip).
+  // Matches backtest methodology (FEE_PCT 0.0004) so paper P&L = expected live net.
+  const fee = pos.size * FEE_ROUNDTRIP;
+  const pnl = parseFloat((gross - fee).toFixed(4));
   const won = pnl > 0;
 
-  // Balance only reflects realized P&L (pnl is already leverage-adjusted)
+  // Balance reflects realized P&L net of fees (pnl is already leverage-adjusted)
   // Was: acc.balance += pos.size + pnl  — that inflated balance by (size - riskUSD) every close
   acc.balance += pnl;
   acc.stats.total++;
@@ -441,7 +448,7 @@ function closeTrade(acc, pos, price, reason, closed) {
   if (pos.direction === "LONG")  { acc.stats.longTotal++;  if (won) acc.stats.longWins++;  }
   if (pos.direction === "SHORT") { acc.stats.shortTotal++; if (won) acc.stats.shortWins++; }
 
-  const trade = { ...pos, exitPrice: price, exitTime: new Date().toISOString(), exitReason: reason, pnl: parseFloat(pnl.toFixed(4)), won };
+  const trade = { ...pos, exitPrice: price, exitTime: new Date().toISOString(), exitReason: reason, gross: parseFloat(gross.toFixed(4)), fee: parseFloat(fee.toFixed(4)), pnl, won };
   acc.closedTrades.push(trade);
   closed.push(trade);
 

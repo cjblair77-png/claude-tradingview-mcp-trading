@@ -424,7 +424,10 @@ async function checkExits(acc) {
     if (!exitReason) continue;
 
     const priceDiff = isLong ? exitPrice - pos.entry : pos.entry - exitPrice;
-    const pnl       = (priceDiff / pos.entry) * pos.sizeUSD;
+    const gross     = (priceDiff / pos.entry) * pos.sizeUSD;
+    // Net of fees: GP uses maker (limit) orders = 0% on MEXC. Taker fallback = 0.04% round-trip.
+    const fee       = pos.orderType === "TAKER" ? pos.sizeUSD * 0.0004 : 0;
+    const pnl       = gross - fee;
     acc.balance += pnl;
     if (acc.balance > acc.peak) acc.peak = acc.balance;
 
@@ -432,6 +435,7 @@ async function checkExits(acc) {
       symbol: pos.symbol, direction: pos.direction,
       entry: pos.entry, exit: exitPrice, sl: pos.sl, tp: pos.tp,
       riskUSD: pos.riskUSD, sizeUSD: pos.sizeUSD,
+      gross: Math.round(gross * 100) / 100, fee: Math.round(fee * 100) / 100,
       pnl: Math.round(pnl * 100) / 100,
       exitReason, entryTime: pos.entryTime, exitTime: Date.now(),
       orderType: pos.orderType,

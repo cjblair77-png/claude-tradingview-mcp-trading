@@ -607,7 +607,10 @@ async function checkExits(acc) {
     if (!exitReason) continue;
 
     const priceDiff = isLong ? exitPrice - pos.entry : pos.entry - exitPrice;
-    const pnl       = (priceDiff / pos.entry) * pos.sizeUSD;
+    const gross     = (priceDiff / pos.entry) * pos.sizeUSD;
+    // Net of fees: maker fills = 0% (MEXC), taker market orders = 0.04% round-trip.
+    const fee       = pos.orderType === "MAKER" ? 0 : pos.sizeUSD * 0.0004;
+    const pnl       = gross - fee;
 
     acc.balance += pnl;
     if (acc.balance > acc.peak) acc.peak = acc.balance;
@@ -617,6 +620,7 @@ async function checkExits(acc) {
       entry: pos.entry, exit: exitPrice, sl: pos.sl, tp: pos.tp,
       riskUSD: pos.riskUSD, sizeUSD: pos.sizeUSD,
       signal: pos.signal,
+      gross: Math.round(gross * 100) / 100, fee: Math.round(fee * 100) / 100,
       pnl: Math.round(pnl * 100) / 100,
       exitReason, entryTime: pos.entryTime, exitTime: now,
     };
