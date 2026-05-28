@@ -63,6 +63,13 @@ async function gistAll(){
   }catch{return {};}
 }
 
+async function saveState(state){
+  if(!GIST_ID||!GITHUB_TOKEN)return;
+  try{
+    await fetch(`https://api.github.com/gists/${GIST_ID}`,{method:"PATCH",headers:{Authorization:`token ${GITHUB_TOKEN}`,"Content-Type":"application/json",Accept:"application/vnd.github+json"},body:JSON.stringify({files:{"pulse_state.json":{content:JSON.stringify(state,null,2)}}}),signal:AbortSignal.timeout(10000)});
+  }catch(e){console.warn("[state] save failed:",e.message);}
+}
+
 function ascii(s){return s.replace(/[^\x20-\x7E]/g,"").trim();}
 async function notify(title,body){
   for(let attempt=1;attempt<=3;attempt++){
@@ -111,7 +118,83 @@ async function main(){
   const leadBull = ALT_LEADERS.every(s=>majorReg[s]==="bull");
   const arrow = r => r==="bear"?"v":r==="bull"?"^":"-";
 
-  // ── v09 scan (4H) ──────────────────────────────────────────────────────
+  // ── Multi-timeframe confluence (30/60/90 min) on the majors basket ──────
+  // For each window, the % change of each major; basket = average; count
+  // how many majors agree with the basket direction. STRONG confluence =
+  // all 3 windows same direction with 4-5/5 majors aligned in each.
+  const WINDOWS = [{label:"30m",bars:2},{label:"60m",bars:4},{label:"90m",bars:6}];
+  const m15 = {};
+  for(const sym of MAJORS){ const b=await klines(sym,"Min15",60); await sleep(60); if(b&&b.length>10) m15[sym]=b.map(x=>x.c); }
+  const mtf = WINDOWS.map(w=>{
+    let sum=0, n=0, down=0, up=0;
+    for(const sym of MAJORS){
+      const c=m15[sym]; if(!c||c.length<=w.bars) continue;
+      const chg=(c[c.length-1]/c[c.length-1-w.bars]-1)*100;
+      sum+=chg; n++; if(chg<0) down++; else if(chg>0) up++;
+    }
+    const avg=n?sum/n:0;
+    const dir=avg<0?"DOWN":avg>0?"UP":"FLAT";
+    const agree=dir==="DOWN"?down:dir==="UP"?up:0;
+    return {label:w.label, avg, dir, agree, n};
+  });
+  const allDown = mtf.every(w=>w.dir==="DOWN");
+  const allUp   = mtf.every(w=>w.dir==="UP");
+  const minAgree = Math.min(...mtf.map(w=>w.agree));
+  let confDir = allDown?"DOWN":allUp?"UP":"MIXED";
+  let confTier = "NONE";
+  if(confDir!=="MIXED"){
+    if(minAgree>=4) confTier="STRONG";       // all 3 windows + 4-5/5 majors each
+    else if(minAgree>=3) confTier="BUILDING"; // all 3 windows + 3/5 majors each
+    else confTier="WEAK";
+  }
+  // 30m basket move for fast-move detection
+  const fastMovePct = mtf[0]?.avg ?? 0;
+
+  // ── Decide run type: full 6h report, or quick alert-on-change ───────────
+  const minUTC = new Date().getUTCMinutes();
+  const fullReport = (hourUTC % 6 === 0) && minUTC < 30;   // 00/06/12/18 UTC
+  const prev = files["pulse_state.json"] || {};
+  const confChanged = confTier === "STRONG" && (prev.confTier !== "STRONG" || prev.confDir !== confDir);
+  const fastMove = Math.abs(fastMovePct) >= 1.5;           // sharp 30m basket move
+  const sendAlert = fullReport || confChanged || fastMove;
+  const arrowM = d => d==="DOWN"?"v":d==="UP"?"^":"-";
+
+  // ── Header: MTF confluence + breadth (always built) ─────────────────────
+  const H=[];
+  H.push(`MARKET PULSE  ${new Date().toUTCString().slice(17,22)} UTC`);
+  if(regime) H.push(`BTC $${Math.round(regime.btcPrice).toLocaleString()} | shorts ${macroBull?"OFF (macro bull)":"ON"}`);
+  H.push("");
+  H.push(`== MTF CONFLUENCE (majors 30/60/90m) ==`);
+  H.push(confTier==="NONE" ? `MIXED - timeframes not aligned` : `${confDir} - ${confTier} (min ${minAgree}/5 agree)`);
+  for(const w of mtf) H.push(`${w.label}: ${pct(w.avg)} (${w.agree}/${w.n} ${arrowM(w.dir)})`);
+  H.push("");
+  H.push(`== MAJORS BREADTH (4H) ==`);
+  H.push(`${aligned}/5 ${breadthDir} (${breadthLabel})`);
+  H.push(MAJORS.map(s=>`${coin(s)} ${arrow(majorReg[s])}`).join("  "));
+  if(holdouts.length && holdouts.length<=2) H.push(`Holdout: ${holdouts.join(", ")}`);
+  if(leadBear) H.push(`ETH/SOL/XRP unanimous DOWN - alt shorts have tailwind`);
+  else if(leadBull) H.push(`ETH/SOL/XRP unanimous UP - alt longs have tailwind`);
+
+  await saveState({confTier, confDir, ts:Date.now()});
+
+  // Silent if nothing meaningful and not a 6h mark
+  if(!sendAlert){
+    console.log(H.join("\n"));
+    console.log("\n(silent — confluence not STRONG, no fast move, not a 6h mark)\n");
+    return;
+  }
+
+  // Quick confluence/fast-move alert (between 6h reports)
+  if(!fullReport){
+    const reason = confChanged ? `STRONG ${confDir} confluence — 30/60/90m aligned` : `Fast ${fastMovePct<0?"DROP":"PUMP"} ${pct(fastMovePct)} on majors (30m)`;
+    const body = H.join("\n") + `\n\n>> TRIGGER: ${reason}\n>> Watch alt setups in this direction.`;
+    console.log(body);
+    await notify(`Majors ${confDir} ${confTier}`, body);
+    console.log("✅ Alert sent.\n");
+    return;
+  }
+
+  // ── FULL 6h report: scan v09 + DT + GP ──────────────────────────────────
   let regCounts={bull:0,neutral:0,bear:0};
   let nearLong=null, nearShort=null;
   for(const sym of V09_PAIRS){
@@ -123,80 +206,45 @@ async function main(){
     const rsi=rsiLast(c.slice(-50));
     const recent=c.slice(-1-V09_LOOKBACK,-1);
     const highN=Math.max(...recent), lowN=Math.min(...recent);
-    // distance to breakout (LONG) — only meaningful when not already bear
     const distHigh=(highN-price)/price*100;
     if(reg!=="bear" && distHigh>=0 && (!nearLong||distHigh<nearLong.dist)) nearLong={sym,dist:distHigh,rsi};
-    // distance to breakdown (momentum SHORT) — bear regime + RSI in 35-52
     const distLow=(price-lowN)/price*100;
     if(reg==="bear" && distLow>=0 && (!nearShort||distLow<nearShort.dist)) nearShort={sym,dist:distLow,rsi};
   }
   const v09open=(v09acc?.openPositions||[]);
 
-  // ── DT scan (15m) ──────────────────────────────────────────────────────
   let dtOversold=0, dtInWindow=[];
   for(const sym of DT_PAIRS){
     const bars=await klines(sym,"Min15",120); await sleep(60);
     if(!bars||bars.length<60)continue;
-    const c=bars.map(b=>b.c);
-    const rsi=rsiLast(c.slice(-50));
+    const rsi=rsiLast(bars.map(b=>b.c).slice(-50));
     if(rsi<35) dtOversold++;
     else if(rsi>=35&&rsi<=65) dtInWindow.push({sym,rsi});
   }
-  const dtSession = !(hourUTC>=1&&hourUTC<8); // DT blocks Asia 01-08 UTC
+  const dtSession = !(hourUTC>=1&&hourUTC<8);
   const dtOpen=(dtacc?.positions||[]);
-
-  // ── GP (session + pending from Gist) ────────────────────────────────────
   const gpSession = hourUTC>=13 && hourUTC<18;
   const gpOpen=(gpacc?.positions||[]);
   const gpPending=(gpacc?.pendingPositions||[]);
 
-  // ── Compose report ──────────────────────────────────────────────────────
-  const L=[];
-  L.push(`MARKET PULSE  ${new Date().toUTCString().slice(17,22)} UTC`);
-  if(regime) L.push(`BTC $${Math.round(regime.btcPrice).toLocaleString()} | shorts ${macroBull?"OFF (macro bull)":"ON"}`);
-  L.push("");
-
-  // Majors breadth compass
-  L.push(`== MAJORS BREADTH ==`);
-  L.push(`${aligned}/5 ${breadthDir} (${breadthLabel})`);
-  L.push(MAJORS.map(s=>`${coin(s)} ${arrow(majorReg[s])}`).join("  "));
-  if(holdouts.length && holdouts.length<=2) L.push(`Holdout: ${holdouts.join(", ")}`);
-  if(leadBear) L.push(`ETH/SOL/XRP unanimous DOWN - alt shorts have tailwind`);
-  else if(leadBull) L.push(`ETH/SOL/XRP unanimous UP - alt longs have tailwind`);
-  L.push("");
-
-  // v09
+  const L=[...H, ""];
   L.push(`== v09 (4H, 30 alts) ==`);
-  L.push(`Want: LONG breakouts in uptrends / momentum SHORTS in bear`);
   L.push(`Regime: ${regCounts.bull}bull ${regCounts.neutral}neut ${regCounts.bear}bear`);
-  if(v09open.length){
-    for(const p of v09open) L.push(`ACTIVE: ${p.direction} ${coin(p.symbol)} @ $${p.entryPrice} (${p.signal})`);
-  } else {
+  if(v09open.length){ for(const p of v09open) L.push(`ACTIVE: ${p.direction} ${coin(p.symbol)} @ $${p.entryPrice} (${p.signal})`); }
+  else {
     if(nearShort) L.push(`Closest SHORT: ${coin(nearShort.sym)} ${pct(-nearShort.dist)} to 15-bar low, RSI ${nearShort.rsi?.toFixed(0)}`);
     if(nearLong)  L.push(`Closest LONG: ${coin(nearLong.sym)} ${pct(nearLong.dist)} to breakout, RSI ${nearLong.rsi?.toFixed(0)}`);
     if(!nearShort&&!nearLong) L.push(`No pairs near a trigger`);
   }
   L.push("");
-
-  // DT
   L.push(`== DT (15m, 8 majors) ==`);
-  L.push(`Want: EMA recapture/rejection, RSI 35-65, in session`);
   L.push(`Session: ${dtSession?"ACTIVE":"paused (Asia 01-08 UTC)"}`);
-  if(dtOpen.length){
-    for(const p of dtOpen) L.push(`ACTIVE: ${p.direction} ${coin(p.symbol)} @ $${p.entry}`);
-  } else if(dtOversold>=DT_PAIRS.length-1){
-    L.push(`${dtOversold}/${DT_PAIRS.length} oversold (RSI<35) - entries BLOCKED, waiting for bounce`);
-  } else if(dtInWindow.length){
-    const names=dtInWindow.slice(0,3).map(d=>`${coin(d.sym)} ${d.rsi.toFixed(0)}`).join(", ");
-    L.push(`In RSI window: ${names} - watching for setup`);
-  } else {
-    L.push(`No pairs in entry window`);
-  }
+  if(dtOpen.length){ for(const p of dtOpen) L.push(`ACTIVE: ${p.direction} ${coin(p.symbol)} @ $${p.entry}`); }
+  else if(dtOversold>=DT_PAIRS.length-1) L.push(`${dtOversold}/${DT_PAIRS.length} oversold (RSI<35) - entries BLOCKED`);
+  else if(dtInWindow.length) L.push(`In RSI window: ${dtInWindow.slice(0,3).map(d=>`${coin(d.sym)} ${d.rsi.toFixed(0)}`).join(", ")}`);
+  else L.push(`No pairs in entry window`);
   L.push("");
-
-  // GP
   L.push(`== GP (15m Fib, 7 pairs) ==`);
-  L.push(`Want: impulse + 0.618 retrace, 13-18 UTC only`);
   L.push(`Session: ${gpSession?"ACTIVE":"closed (opens 13 UTC)"}`);
   if(gpOpen.length) for(const p of gpOpen) L.push(`ACTIVE: ${p.direction} ${coin(p.symbol)} @ $${p.entry}`);
   if(gpPending.length) for(const p of gpPending) L.push(`PENDING: ${p.direction} ${coin(p.symbol)} limit $${p.limitPrice}`);
@@ -204,8 +252,7 @@ async function main(){
 
   const body=L.join("\n");
   console.log(body);
-  console.log("");
-  await notify("Market Pulse", body);
-  console.log("✅ Done.\n");
+  await notify("Market Pulse (6h report)", body);
+  console.log("✅ Full report sent.\n");
 }
 main().catch(e=>{console.error("FATAL:",e);notify("Market Pulse - ERROR",e.message).catch(()=>{});process.exit(1);});
