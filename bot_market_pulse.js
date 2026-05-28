@@ -25,6 +25,11 @@ const V09_PAIRS = [
 ];
 const DT_PAIRS = ["BTC_USDT","ETH_USDT","SOL_USDT","BNB_USDT","XRP_USDT","SUI_USDT","LTC_USDT","AVAX_USDT"];
 
+// Majors basket for market-breadth compass (4H regime). BTC is the laggard;
+// ETH/SOL/XRP are the higher-beta "alt-leaders" that lead risk-on/off moves.
+const MAJORS      = ["BTC_USDT","ETH_USDT","SOL_USDT","BNB_USDT","XRP_USDT"];
+const ALT_LEADERS = ["ETH_USDT","SOL_USDT","XRP_USDT"];
+
 const V09_LOOKBACK = 15;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -85,6 +90,27 @@ async function main(){
   const regime = files["regime_state.json"];
   const macroBull = !!(regime?.daily?.ema50_gt_200 || regime?.weekly?.ema10_gt_20);
 
+  // ── Majors breadth compass (4H regime per major) ───────────────────────
+  const majorReg = {};
+  for(const sym of MAJORS){
+    const bars=await klines(sym,"Hour4",250); await sleep(60);
+    if(!bars||bars.length<60){ majorReg[sym]="?"; continue; }
+    majorReg[sym]=v09RegimeLast(bars.map(b=>b.c));
+  }
+  const bearCount = MAJORS.filter(s=>majorReg[s]==="bear").length;
+  const bullCount = MAJORS.filter(s=>majorReg[s]==="bull").length;
+  // Dominant direction + graded label (don't require 5/5 — 4/5 = CONFIRMED)
+  let breadthDir="MIXED", aligned=Math.max(bearCount,bullCount);
+  if(bearCount>bullCount) breadthDir="BEARISH"; else if(bullCount>bearCount) breadthDir="BULLISH";
+  const breadthLabel = aligned>=5?"STRONG":aligned===4?"CONFIRMED":aligned===3?"LEANING":"MIXED";
+  // Holdout = the major NOT matching the dominant direction
+  const domReg = breadthDir==="BEARISH"?"bear":breadthDir==="BULLISH"?"bull":null;
+  const holdouts = domReg ? MAJORS.filter(s=>majorReg[s]!==domReg).map(coin) : [];
+  // Alt-leader trio unanimity (more predictive for our alts than BTC)
+  const leadBear = ALT_LEADERS.every(s=>majorReg[s]==="bear");
+  const leadBull = ALT_LEADERS.every(s=>majorReg[s]==="bull");
+  const arrow = r => r==="bear"?"v":r==="bull"?"^":"-";
+
   // ── v09 scan (4H) ──────────────────────────────────────────────────────
   let regCounts={bull:0,neutral:0,bear:0};
   let nearLong=null, nearShort=null;
@@ -127,7 +153,16 @@ async function main(){
   // ── Compose report ──────────────────────────────────────────────────────
   const L=[];
   L.push(`MARKET PULSE  ${new Date().toUTCString().slice(17,22)} UTC`);
-  if(regime) L.push(`BTC $${Math.round(regime.btcPrice).toLocaleString()} | regime ${regCounts.bear>regCounts.bull?"BEARISH":regCounts.bull>regCounts.bear?"BULLISH":"MIXED"} | shorts ${macroBull?"OFF (macro bull)":"ON"}`);
+  if(regime) L.push(`BTC $${Math.round(regime.btcPrice).toLocaleString()} | shorts ${macroBull?"OFF (macro bull)":"ON"}`);
+  L.push("");
+
+  // Majors breadth compass
+  L.push(`== MAJORS BREADTH ==`);
+  L.push(`${aligned}/5 ${breadthDir} (${breadthLabel})`);
+  L.push(MAJORS.map(s=>`${coin(s)} ${arrow(majorReg[s])}`).join("  "));
+  if(holdouts.length && holdouts.length<=2) L.push(`Holdout: ${holdouts.join(", ")}`);
+  if(leadBear) L.push(`ETH/SOL/XRP unanimous DOWN - alt shorts have tailwind`);
+  else if(leadBull) L.push(`ETH/SOL/XRP unanimous UP - alt longs have tailwind`);
   L.push("");
 
   // v09
