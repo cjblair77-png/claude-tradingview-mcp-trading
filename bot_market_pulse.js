@@ -63,11 +63,13 @@ async function gistAll(){
   }catch{return {};}
 }
 
-async function saveState(state){
+async function saveGistFiles(filesObj){
   if(!GIST_ID||!GITHUB_TOKEN)return;
   try{
-    await fetch(`https://api.github.com/gists/${GIST_ID}`,{method:"PATCH",headers:{Authorization:`token ${GITHUB_TOKEN}`,"Content-Type":"application/json",Accept:"application/vnd.github+json"},body:JSON.stringify({files:{"pulse_state.json":{content:JSON.stringify(state,null,2)}}}),signal:AbortSignal.timeout(10000)});
-  }catch(e){console.warn("[state] save failed:",e.message);}
+    const files={};
+    for(const [name,obj] of Object.entries(filesObj)) files[name]={content:JSON.stringify(obj,null,2)};
+    await fetch(`https://api.github.com/gists/${GIST_ID}`,{method:"PATCH",headers:{Authorization:`token ${GITHUB_TOKEN}`,"Content-Type":"application/json",Accept:"application/vnd.github+json"},body:JSON.stringify({files}),signal:AbortSignal.timeout(10000)});
+  }catch(e){console.warn("[gist] save failed:",e.message);}
 }
 
 function ascii(s){return s.replace(/[^\x20-\x7E]/g,"").trim();}
@@ -194,7 +196,22 @@ async function main(){
   if(leadBear) H.push(`ETH/SOL/XRP unanimous DOWN - alt shorts have tailwind`);
   else if(leadBull) H.push(`ETH/SOL/XRP unanimous UP - alt longs have tailwind`);
 
-  await saveState({confTier, confDir, ts:Date.now()});
+  // Append snapshot to rolling confluence history (for later efficacy analysis).
+  // Captured EVERY run so we can later cross-reference trade entry times against
+  // the confluence state at that moment — the evidence for whether to wire it in.
+  const hist = Array.isArray(files["confluence_history.json"]) ? files["confluence_history.json"] : [];
+  hist.push({
+    ts: Date.now(),
+    confTier, confDir, minAgree,
+    vol: volConfirmed?"confirmed":"light", volSurging, volRatio:+avgVolRatio.toFixed(2),
+    conviction: conviction || "none",
+    breadthDir, aligned,
+    m30:+(mtf[0]?.avg??0).toFixed(2), m60:+(mtf[1]?.avg??0).toFixed(2), m90:+(mtf[2]?.avg??0).toFixed(2),
+    btc: regime?.btcPrice ? Math.round(regime.btcPrice) : null,
+  });
+  while(hist.length>1500) hist.shift();   // ~31 days at 30-min cadence
+  await saveGistFiles({ "pulse_state.json": {confTier, confDir, ts:Date.now()}, "confluence_history.json": hist });
+  console.log(`[history] logged snapshot (${hist.length} total)`);
 
   // Silent if nothing meaningful and not a 6h mark
   if(!sendAlert){
