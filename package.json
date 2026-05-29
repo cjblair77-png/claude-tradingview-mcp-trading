@@ -1,8 +1,22 @@
 {
   "name": "claude-tradingview-mcp-trading",
+  "version": "1.0.0",
+  "description": "MEXC futures paper-trading bots (v09 / DT / Golden Pocket) + monitors",
   "type": "module",
   "scripts": {
     "start": "node bot_crypto_v09_mexc.js",
-    "test": "echo \"Error: no test\""
+    "v09": "node bot_crypto_v09_mexc.js",
+    "dt": "node bot_daytrading_mexc.js",
+    "gp": "node bot_golden_pocket.js",
+    "regime": "node bot_regime_monitor.js",
+    "pulse": "node bot_market_pulse.js",
+    "dashboard": "node dashboard_portfolio.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
