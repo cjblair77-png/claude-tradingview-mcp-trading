@@ -23,7 +23,7 @@ const RR        = 1.3;
 const MAX_HOLD  = 8;              // 8 × 15m = 2hr
 const MAX_SL_PCT = 0.012;
 const EMA50_PAIRS = new Set(["BTCUSDT", "SUIUSDT"]);
-const PAIRS     = ["BTCUSDT", "BNBUSDT", "XRPUSDT", "SUIUSDT"];
+const PAIRS     = ["BTCUSDT", "BNBUSDT", "XRPUSDT", "SUIUSDT", "LTCUSDT", "AVAXUSDT"];
 
 // ─── Fetch ────────────────────────────────────────────────────────────────────
 
@@ -101,6 +101,36 @@ function vwap(candles) {
 
 function inSession(ts) { const h = new Date(ts).getUTCHours(); return h >= 1 && h < 22; }
 
+// ADX (Wilder, period=14) — trend strength filter. > 20 = trending, < 20 = choppy.
+function adxCalc(candles, period=14) {
+  const n=candles.length, out=new Array(n).fill(null);
+  const tr=[],pdm=[],ndm=[];
+  for(let i=1;i<n;i++){
+    const h=candles[i].high,l=candles[i].low,pc=candles[i-1].close;
+    const ph=candles[i-1].high,pl=candles[i-1].low;
+    tr.push(Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc)));
+    const up=h-ph,dn=pl-l;
+    pdm.push(up>dn&&up>0?up:0);
+    ndm.push(dn>up&&dn>0?dn:0);
+  }
+  if(tr.length<period*2) return out;
+  let smTR=tr.slice(0,period).reduce((a,b)=>a+b,0);
+  let smP=pdm.slice(0,period).reduce((a,b)=>a+b,0);
+  let smN=ndm.slice(0,period).reduce((a,b)=>a+b,0);
+  const dx=[];
+  const calcDX=()=>{const p=smTR>0?100*smP/smTR:0,nn=smTR>0?100*smN/smTR:0;return(p+nn)>0?100*Math.abs(p-nn)/(p+nn):0;};
+  dx.push(calcDX());
+  for(let i=period;i<tr.length;i++){
+    smTR=smTR-smTR/period+tr[i];smP=smP-smP/period+pdm[i];smN=smN-smN/period+ndm[i];
+    dx.push(calcDX());
+  }
+  if(dx.length<period) return out;
+  let adxVal=dx.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  out[2*period-1]=adxVal;
+  for(let j=period;j<dx.length;j++){adxVal=(adxVal*(period-1)+dx[j])/period;out[j+period]=adxVal;}
+  return out;
+}
+
 // ─── Pre-compute signals for one pair ─────────────────────────────────────────
 // Returns array indexed by candle, each entry is the signal at that bar (or null)
 
@@ -108,57 +138,52 @@ function computeSignals(symbol, candles) {
   const closes = candles.map(c => c.close);
   const vols   = candles.map(c => c.volume);
   const e21    = ema(closes, 21);
-  const e50    = ema(closes, 50);
-  const e100   = ema(closes, 100);
-  const vwap_  = vwap(candles);
+  const e50    = ema(closes, 50);  // short-term direction (1hr) + EMA50 bounce signal
   const rsi_   = rsi(closes, 14);
   const vsma   = sma(vols, 20);
+  const adx_   = adxCalc(candles);
   const signals = new Array(candles.length).fill(null);
+  const tb = 4;  // 4 bars × 15m = 1 hour short-term momentum lookback
 
-  for (let i = 115; i < candles.length - 1; i++) {
-    if (!rsi_[i] || !vsma[i]) continue;
+  for (let i = 70; i < candles.length - 1; i++) {
+    if (!rsi_[i] || !vsma[i] || i < tb) continue;
     if (!inSession(candles[i].time)) continue;
+    if (!adx_[i] || adx_[i] < 20) continue;  // skip choppy/ranging markets
 
     const c = candles[i], p = candles[i-1];
     const r = rsi_[i];
     const volOk = c.volume > vsma[i] * 1.2;
-    const tb = 8;
+    const e50Up = e50[i] > e50[i-tb];  // EMA50 rising over last 1 hour
+    const e50Dn = e50[i] < e50[i-tb];  // EMA50 falling over last 1 hour
 
-    const macroLong  = c.close > e100[i];
-    const macroShort = c.close < e100[i];
-    const ema50Up    = e50[i] > e50[i - tb];
-    const ema50Down  = e50[i] < e50[i - tb];
-    const aboveVwap  = c.close > vwap_[i];
-    const belowVwap  = c.close < vwap_[i];
-
-    // LONG A: EMA21 recapture
-    if (macroLong && ema50Up && aboveVwap && r >= 40 && r < 65 && volOk
+    // LONG A: EMA21 recapture — short-term momentum up (1hr), no macro filter
+    if (!signals[i] && e50Up && r >= 40 && r < 65 && volOk
         && p.close < e21[i-1] && c.close > e21[i]) {
       const sl = Math.min(...candles.slice(Math.max(0,i-3), i+1).map(x => x.low));
       const risk = c.close - sl;
       if (risk > 0 && risk/c.close < MAX_SL_PCT)
         signals[i] = { direction:"LONG", entry:c.close, sl, tp:c.close+risk*RR, signal:"EMA21" };
     }
-    // LONG B: EMA50 bounce (BTC+SUI only)
+    // LONG B: EMA50 bounce (BTC+SUI only) — EMA50 rising = consistent bounce direction
     if (!signals[i] && EMA50_PAIRS.has(symbol)
-        && macroLong && ema50Up && aboveVwap && r >= 38 && r < 62 && volOk
+        && e50Up && r >= 38 && r < 62 && volOk
         && p.close < e50[i-1] && c.close > e50[i]) {
       const sl = Math.min(...candles.slice(Math.max(0,i-4), i+1).map(x => x.low));
       const risk = c.close - sl;
       if (risk > 0 && risk/c.close < 0.018)
         signals[i] = { direction:"LONG", entry:c.close, sl, tp:c.close+risk*RR, signal:"EMA50" };
     }
-    // SHORT A: EMA21 rejection
-    if (!signals[i] && macroShort && ema50Down && belowVwap && r > 35 && r <= 60 && volOk
+    // SHORT A: EMA21 rejection — short-term momentum down (1hr), no macro filter
+    if (!signals[i] && e50Dn && r > 35 && r <= 60 && volOk
         && p.close > e21[i-1] && c.close < e21[i]) {
       const sl = Math.max(...candles.slice(Math.max(0,i-3), i+1).map(x => x.high));
       const risk = sl - c.close;
       if (risk > 0 && risk/c.close < MAX_SL_PCT)
         signals[i] = { direction:"SHORT", entry:c.close, sl, tp:c.close-risk*RR, signal:"EMA21" };
     }
-    // SHORT B: EMA50 rejection (BTC+SUI only)
+    // SHORT B: EMA50 rejection (BTC+SUI only) — EMA50 falling = consistent rejection direction
     if (!signals[i] && EMA50_PAIRS.has(symbol)
-        && macroShort && ema50Down && belowVwap && r > 38 && r <= 62 && volOk
+        && e50Dn && r > 38 && r <= 62 && volOk
         && p.close > e50[i-1] && c.close < e50[i]) {
       const sl = Math.max(...candles.slice(Math.max(0,i-4), i+1).map(x => x.high));
       const risk = sl - c.close;

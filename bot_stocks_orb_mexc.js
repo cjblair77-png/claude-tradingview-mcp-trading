@@ -425,6 +425,14 @@ async function processSymbol(sym, state) {
   const lastBar  = postOrbBars[postOrbBars.length - 1];
   const volOk    = volBaseline === null || lastBar.v > volBaseline;
 
+  // No new entries after 17:00 UTC — avoids late-day drift signals with poor follow-through
+  const barHour  = new Date(lastBar.t).getUTCHours();
+  const tooLate  = barHour >= 17;
+  if (tooLate) {
+    console.log(`  ${sym.padEnd(22)} 🕔 Entry window closed (past 17:00 UTC)`);
+    return;
+  }
+
   // Breakout LONG: close above OR high
   if (lastBar.c > state.orHigh && volOk) {
     const entry = lastBar.c;

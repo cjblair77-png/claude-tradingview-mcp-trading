@@ -2,3 +2,14 @@
 *.log
 safety-check-log.json
 node_modules/
+
+# Archived legacy code/outputs (kept locally, not in repo)
+_archive/
+
+# Local paper-trading state (source of truth is the GitHub Gist)
+paper_account_*.json
+paper_daytrading_*.json
+trades_*.csv
+
+# Backtest output artifacts (regenerable)
+results-*.json

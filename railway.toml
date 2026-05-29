@@ -1,15 +1,15 @@
+# Railway config — reference/documentation only.
+#
+# NOTE: Each bot runs as its OWN Railway service, with its Start Command + Cron
+# Schedule configured in the Railway UI (NOT driven by this file). This block
+# documents the intended setup so it's recoverable if a service is rebuilt.
+#
+# Live services (all MEXC, paper trading):
+#   v09 crypto      node bot_crypto_v09_mexc.js   0 * * * *           hourly; 4H scan at 0/4/8/12/16/20 UTC
+#   DT day-trading  node bot_daytrading_mexc.js   0,15,30,45 * * * *  every 15 min
+#   Golden Pocket   node bot_golden_pocket.js     0,15,30,45 * * * *  every 15 min
+#   Regime monitor  node bot_regime_monitor.js    0 12 * * *          daily; drives short macro-gate
+#   Market pulse    node bot_market_pulse.js      */30 * * * *        every 30 min; conditions + confluence log
+
 [build]
 builder = "NIXPACKS"
-
-# The 4 Hour Strategy — runs hourly.
-# Every run: check 1H candles for TP/SL on open positions.
-# At 0h/4h/8h/12h/16h/20h UTC: full 4H signal scan for new entries.
-[[deploy.cronJobs]]
-command = "node bot_crypto_v09.js"
-schedule = "0 * * * *"
-
-# The 15-Minute Day Trading Strategy — BTC/ETH/BNB/XRP universe.
-# EMA21 recapture signal, Asia + US sessions only.
-[[deploy.cronJobs]]
-command = "node bot_daytrading_v01.js"
-schedule = "0,15,30,45 * * * *"

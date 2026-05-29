@@ -484,10 +484,12 @@ async function checkExits(acc) {
     const sign = pnl >= 0 ? "✅" : "❌";
     console.log(`  ${sign} EXIT ${pos.symbol} ${pos.direction}  ${exitReason}  P&L: $${pnl.toFixed(2)}`);
 
+    const totPnl = acc.trades.reduce((s, t) => s + (t.pnl || 0), 0);
     await notify(
-      `${sign} DT ${pos.symbol} ${pos.direction} closed — ${exitReason}\n` +
-      `P&L: $${pnl.toFixed(2)}  |  Balance: $${acc.balance.toFixed(2)}\n` +
-      `Entry: $${pos.entry}  Exit: $${exitPrice.toFixed(4)}`
+      `${sign} DT ${pos.symbol} ${pos.direction} — ${exitReason}\n` +
+      `P&L: ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}  |  Balance: $${acc.balance.toFixed(2)}\n` +
+      `Entry: $${pos.entry}  →  Exit: $${exitPrice.toFixed(4)}\n` +
+      `Total P&L: ${totPnl >= 0 ? "+" : ""}$${totPnl.toFixed(2)}  |  Trades: ${acc.trades.length}`
     );
     anyExited = true;
   }
@@ -550,10 +552,12 @@ async function checkEntries(acc) {
       `     RSI: ${sig.rsi}  Signal: ${sig.signal}  Risk: $${riskUSD.toFixed(2)}  Notional: $${sizeUSD.toFixed(2)} (${CFG.leverage}x)`
     );
 
+    const potWin  = riskUSD * CFG.rrRatio;
     await notify(
       `${dir} DT ${symbol} ${sig.direction} OPEN  [${sig.signal} @ ${CFG.leverage}x]\n` +
       `Entry: $${sig.entry.toFixed(4)}  SL: $${sig.sl.toFixed(4)}  TP: $${sig.tp.toFixed(4)}\n` +
-      `RSI: ${sig.rsi}  Risk: $${riskUSD.toFixed(2)}  Notional: $${sizeUSD.toFixed(2)}`
+      `Win: +$${potWin.toFixed(2)}  |  Loss: -$${riskUSD.toFixed(2)}\n` +
+      `Balance: $${acc.balance.toFixed(2)}  |  RSI: ${sig.rsi}`
     );
   }
 }
