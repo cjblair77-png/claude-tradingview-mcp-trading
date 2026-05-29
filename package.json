@@ -1,25 +1,8 @@
 {
   "name": "claude-tradingview-mcp-trading",
-  "version": "1.0.0",
-  "description": "Automated trading bot — Claude + TradingView strategy + BitGet execution",
-  "main": "bot.js",
   "type": "module",
   "scripts": {
-    "start": "node bot_crypto_v09.js",
-    "dev": "node bot_crypto_v09.js",
-    "v09": "node bot_crypto_v09.js",
-    "v09:status": "node bot_crypto_v09.js --status",
-    "dt": "node bot_daytrading_v01.js",
-    "v8": "node bot_crypto_v8.js",
-    "v8:status": "node bot_crypto_v8.js --status",
-    "dashboard": "node dashboard.js",
-    "dashboard:dt": "node dashboard_dt.js"
-  },
-  "dependencies": {
-    "dotenv": "^16.4.5",
-    "node-fetch": "^3.3.2"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "start": "node bot_crypto_v09_mexc.js",
+    "test": "echo \"Error: no test\""
   }
 }
