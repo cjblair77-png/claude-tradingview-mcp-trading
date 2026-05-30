@@ -65,7 +65,9 @@ const CFG = {
   candleLimit:        200,
   ntfyTopic:          process.env.GP_NTFY_TOPIC || "hermes-goldenpocket",
   summaryTopic:       process.env.SUMMARY_NTFY_TOPIC || "hermes-summary",
-  summaryIntervalHrs: parseFloat(process.env.SUMMARY_INTERVAL_HRS || "2"),
+  // Fixed UTC hours to send portfolio summary (comma-separated). Default
+  // 09 + 21 UTC = 7am and 7pm Brisbane (AEST, UTC+10, no DST).
+  summaryHoursUTC: (process.env.SUMMARY_HOURS_UTC || "9,21").split(",").map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n)),
   mexc: {
     apiKey:    process.env.MEXC_API_KEY,
     secretKey: process.env.MEXC_SECRET_KEY,
@@ -631,10 +633,10 @@ async function sendPortfolioSummary() {
   try {
     await fetch(`https://ntfy.sh/${CFG.summaryTopic}`, {
       method: "POST",
-      headers: { "Content-Type": "text/plain", "Title": CFG.summaryIntervalHrs + "h Portfolio Summary" },
+      headers: { "Content-Type": "text/plain", "Title": "Portfolio Summary" },
       body, signal: AbortSignal.timeout(8000),
     });
-    console.log(`  📊 Sent ${CFG.summaryIntervalHrs}h summary to ntfy/${CFG.summaryTopic}`);
+    console.log(`  📊 Sent portfolio summary to ntfy/${CFG.summaryTopic}`);
   } catch (e) {
     console.log(`  ⚠️  Summary push failed: ${e.message}`);
   }
@@ -661,12 +663,17 @@ async function run() {
   await checkExits(acc);
   // 3. Look for new entries (impulse detection)
   await checkEntries(acc);
-  // 4. Portfolio summary push (throttled — every N hours)
-  const summaryIntervalMs = CFG.summaryIntervalHrs * 3600 * 1000;
-  const lastSummary = acc.lastSummary || 0;
-  if (Date.now() - lastSummary > summaryIntervalMs) {
-    await sendPortfolioSummary();
-    acc.lastSummary = Date.now();
+  // 4. Portfolio summary push — at fixed UTC hours only (default 9 + 21 UTC = 7am + 7pm Brisbane).
+  // Dedup by YYYY-MM-DD-HH key so it fires exactly once per scheduled slot
+  // even though this bot runs every 15 minutes.
+  const nowD = new Date();
+  const utcHour = nowD.getUTCHours();
+  if (CFG.summaryHoursUTC.includes(utcHour)) {
+    const slotKey = nowD.toISOString().slice(0, 13);  // e.g. "2026-05-29T09"
+    if (acc.lastSummarySlot !== slotKey) {
+      await sendPortfolioSummary();
+      acc.lastSummarySlot = slotKey;
+    }
   }
   // Save
   await saveAccount(acc);
