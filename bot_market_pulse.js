@@ -18,6 +18,12 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const NTFY_TOPIC   = process.env.PULSE_NTFY_TOPIC || "hermes-pulse";
 const MEXC_BASE    = "https://contract.mexc.com";
 
+// Hours (UTC) at which the FULL pulse report is pushed. Default 9,21 UTC =
+// 7pm + 7am Brisbane (AEST, UTC+10, no DST). Event-driven alerts (STRONG
+// confluence change, fast move) still fire any time outside these slots.
+const REPORT_HOURS_UTC = (process.env.PULSE_REPORT_HOURS_UTC || "9,21")
+  .split(",").map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n));
+
 const V09_PAIRS = [
   "KAIA_USDT","S_USDT","FILECOIN_USDT","AR_USDT","PLUME_USDT","FIDA_USDT","GMT_USDT","ENA_USDT","TIA_USDT","TURBO_USDT",
   "WIF_USDT","SHIB_USDT","BCH_USDT","VET_USDT","ONDO_USDT","THETA_USDT","HBAR_USDT","RUNE_USDT","IOTA_USDT","JUP_USDT",
@@ -169,9 +175,9 @@ async function main(){
                    : (confTier==="STRONG" && !volConfirmed) ? "STRONG but LIGHT VOLUME (watch for exhaustion)"
                    : null;
 
-  // ── Decide run type: full 6h report, or quick alert-on-change ───────────
+  // ── Decide run type: scheduled full report (7am/7pm Brisbane), or quick alert-on-change ───────────
   const minUTC = new Date().getUTCMinutes();
-  const fullReport = (hourUTC % 6 === 0) && minUTC < 30;   // 00/06/12/18 UTC
+  const fullReport = REPORT_HOURS_UTC.includes(hourUTC) && minUTC < 30;   // 9 + 21 UTC by default = 7am + 7pm Brisbane
   const prev = files["pulse_state.json"] || {};
   const confChanged = confTier === "STRONG" && (prev.confTier !== "STRONG" || prev.confDir !== confDir);
   const fastMove = Math.abs(fastMovePct) >= 1.5;           // sharp 30m basket move
@@ -213,10 +219,10 @@ async function main(){
   await saveGistFiles({ "pulse_state.json": {confTier, confDir, ts:Date.now()}, "confluence_history.json": hist });
   console.log(`[history] logged snapshot (${hist.length} total)`);
 
-  // Silent if nothing meaningful and not a 6h mark
+  // Silent if nothing meaningful and not a scheduled report hour
   if(!sendAlert){
     console.log(H.join("\n"));
-    console.log("\n(silent — confluence not STRONG, no fast move, not a 6h mark)\n");
+    console.log("\n(silent — confluence not STRONG, no fast move, not a scheduled report slot)\n");
     return;
   }
 
@@ -288,7 +294,7 @@ async function main(){
 
   const body=L.join("\n");
   console.log(body);
-  await notify("Market Pulse (6h report)", body);
+  await notify("Market Pulse (full report)", body);
   console.log("✅ Full report sent.\n");
 }
 main().catch(e=>{console.error("FATAL:",e);notify("Market Pulse - ERROR",e.message).catch(()=>{});process.exit(1);});
