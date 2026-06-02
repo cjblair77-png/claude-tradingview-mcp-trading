@@ -107,6 +107,7 @@ function isRTH(date = new Date()) {
 // ─── Notifications ────────────────────────────────────────────────────────────
 
 async function notify(title, body, tags = "") {
+  if (process.env.NTFY_ENABLED === "false") return;  // kill switch
   const topic = CFG.ntfyTopic;
   if (!topic) return;
   try {

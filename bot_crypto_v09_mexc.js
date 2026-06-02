@@ -103,6 +103,7 @@ const fmtPct = n => (n >= 0 ? "+" : "") + (n * 100).toFixed(1) + "%";
 // ─── Push Notifications (ntfy.sh) ────────────────────────────────────────────
 
 async function notify(title, body, tags = "") {
+  if (process.env.NTFY_ENABLED === "false") return;  // kill switch
   const topic = process.env.NTFY_TOPIC;
   if (!topic) return;
   try {

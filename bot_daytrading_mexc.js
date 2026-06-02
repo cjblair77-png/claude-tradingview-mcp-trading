@@ -135,6 +135,7 @@ async function saveAccount(acc) {
 // ─── Notifications ────────────────────────────────────────────────────────────
 
 async function notify(msg) {
+  if (process.env.NTFY_ENABLED === "false") return;  // kill switch
   if (!CFG.ntfyTopic) return;
   try {
     await fetch(`https://ntfy.sh/${CFG.ntfyTopic}`, {

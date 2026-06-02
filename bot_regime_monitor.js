@@ -323,6 +323,7 @@ async function saveGistState(state) {
 function ascii(s) { return s.replace(/[^\x20-\x7E]/g, "").trim(); }
 
 async function notify(title, body, priority = "default") {
+  if (process.env.NTFY_ENABLED === "false") return;  // kill switch
   try {
     await fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
       method: "POST",

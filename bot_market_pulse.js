@@ -80,6 +80,7 @@ async function saveGistFiles(filesObj){
 
 function ascii(s){return s.replace(/[^\x20-\x7E]/g,"").trim();}
 async function notify(title,body){
+  if (process.env.NTFY_ENABLED === "false") return;  // kill switch
   for(let attempt=1;attempt<=3;attempt++){
     try{
       await fetch(`https://ntfy.sh/${NTFY_TOPIC}`,{method:"POST",headers:{"Content-Type":"text/plain",Title:ascii(title),Tags:"satellite"},body,signal:AbortSignal.timeout(8000)});
