@@ -245,18 +245,22 @@ function strategyCard(s, prices) {
     </div>`;
   }).join("") : `<div class="no-pos">No closed trades yet</div>`;
 
-  return `<div class="strat-card ${realizedPnl >= 0 ? 'profit' : 'loss'}">
+  return `<div class="strat-card ${totalPnl >= 0 ? 'profit' : 'loss'}">
     <div class="sc-head">
       <span class="sc-name">${s.name}</span>
       <span class="sc-sub">${s.subtitle}</span>
+      <span class="sc-headline ${totalPnl>=0?'pos':'neg'}" title="Realized + Unrealized P&amp;L">
+        ${fmt$(totalPnl)} <span class="sc-headline-pct">${totalPct>=0?'+':''}${totalPct.toFixed(2)}%</span>
+        <span class="sc-headline-lbl">total P&amp;L</span>
+      </span>
       <span class="sc-lastrun">${lastRun ? agoIso(lastRun) : 'never'}</span>
     </div>
     <div class="sc-stats">
       <div class="sc-stat"><div class="sc-l">Balance</div><div class="sc-v">$${fmt(balance)}</div></div>
-      <div class="sc-stat"><div class="sc-l">Equity</div><div class="sc-v">$${fmt(equity)}</div></div>
-      <div class="sc-stat"><div class="sc-l">Realized P&amp;L</div><div class="sc-v ${realizedPnl>=0?'pos':'neg'}">${fmt$(realizedPnl)}</div></div>
+      <div class="sc-stat"><div class="sc-l">Equity</div><div class="sc-v ${totalPnl>=0?'pos':'neg'}">$${fmt(equity)}</div></div>
+      <div class="sc-stat"><div class="sc-l">Realized</div><div class="sc-v ${realizedPnl>=0?'pos':'neg'}">${fmt$(realizedPnl)}</div></div>
       <div class="sc-stat"><div class="sc-l">Unrealized</div><div class="sc-v ${totalUnreal>=0?'pos':'neg'}">${fmt$(totalUnreal)}</div></div>
-      <div class="sc-stat"><div class="sc-l">Total P&amp;L</div><div class="sc-v ${totalPnl>=0?'pos':'neg'}">${fmt$(totalPnl)} <span class="sc-sub2">${totalPct>=0?'+':''}${totalPct.toFixed(1)}%</span></div></div>
+      <div class="sc-stat highlight ${totalPnl>=0?'pos-bg':'neg-bg'}"><div class="sc-l">TOTAL P&amp;L</div><div class="sc-v ${totalPnl>=0?'pos':'neg'}">${fmt$(totalPnl)} <span class="sc-sub2">${totalPct>=0?'+':''}${totalPct.toFixed(1)}%</span></div></div>
       <div class="sc-stat"><div class="sc-l">Trades</div><div class="sc-v">${trades.length}${wr != null ? ` <span class="sc-sub2">${wr}% WR</span>` : ''}</div></div>
       <div class="sc-stat"><div class="sc-l">Open / Pending</div><div class="sc-v">${positions.length} / ${pending.length}</div></div>
     </div>
@@ -385,7 +389,15 @@ h1{font-size:1rem;color:#fbbf24;letter-spacing:.08em;text-transform:uppercase;fo
 .sc-name{font-size:2rem;font-weight:900;color:#fbbf24;letter-spacing:.02em}
 .sc-sub{font-size:.85rem;color:#94a3b8;flex:1}
 .sc-lastrun{font-size:.75rem;color:#64748b}
+.sc-headline{font-size:1.4rem;font-weight:900;margin-left:auto;margin-right:14px;letter-spacing:-.01em;display:flex;align-items:baseline;gap:8px}
+.sc-headline.pos{color:#4ade80}
+.sc-headline.neg{color:#f87171}
+.sc-headline-pct{font-size:1rem;font-weight:700;opacity:.9}
+.sc-headline-lbl{font-size:.6rem;font-weight:600;color:#64748b;letter-spacing:.08em;text-transform:uppercase;margin-left:6px}
 .sc-stats{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:14px}
+.sc-stat.highlight{position:relative;border:1px solid #1e3a5f}
+.sc-stat.highlight.pos-bg{background:linear-gradient(135deg,rgba(34,197,94,.10),rgba(34,197,94,.04));border-color:rgba(34,197,94,.35)}
+.sc-stat.highlight.neg-bg{background:linear-gradient(135deg,rgba(239,68,68,.10),rgba(239,68,68,.04));border-color:rgba(239,68,68,.35)}
 @media(max-width:1100px){.sc-stats{grid-template-columns:repeat(4,1fr)}}
 @media(max-width:600px){.sc-stats{grid-template-columns:repeat(2,1fr)}}
 .sc-stat{background:#080c14;border-radius:8px;padding:10px 12px;text-align:center}
