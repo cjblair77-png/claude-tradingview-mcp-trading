@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shark School</title>
+<meta name="description" content="A poker maths trainer with an instructor who has no patience left.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230d3b2e'/%3E%3Ctext x='16' y='24' font-size='22' text-anchor='middle' fill='%23e0b24c'%3E%E2%99%A0%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>Shark School <span class="suit">&spades;</span></h1>
+      <div class="tagline">Poker is arithmetic with a pulse. Vic will be teaching the arithmetic.</div>
+    </div>
+    <div>
+      <div class="scoreboard" id="scoreboard"></div>
+      <div class="heat" style="margin-top:10px; justify-content:flex-end">
+        <label for="heat">Vic's mood</label>
+        <select id="heat">
+          <option value="0">Supportive</option>
+          <option value="1" selected>Cheeky</option>
+          <option value="2">Brutal</option>
+        </select>
+      </div>
+    </div>
+  </header>
+
+  <section class="vic">
+    <div class="face" aria-hidden="true">&spades;</div>
+    <div class="bubble">
+      <div class="who">Vic &mdash; house instructor</div>
+      <p id="vic-line">Sit down.</p>
+      <div class="lesson hidden" id="vic-lesson"></div>
+    </div>
+  </section>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" id="tab-drill" aria-selected="true" aria-controls="view-drill">Drills</button>
+    <button role="tab" id="tab-lab" aria-selected="false" aria-controls="view-lab">Equity lab</button>
+    <button role="tab" id="tab-stats" aria-selected="false" aria-controls="view-stats">Report card</button>
+    <button role="tab" id="tab-sheet" aria-selected="false" aria-controls="view-sheet">Cheat sheet</button>
+  </nav>
+
+  <!-- ---------------- drills ---------------- -->
+  <div id="view-drill" role="tabpanel" aria-labelledby="tab-drill">
+    <div class="panel">
+      <div class="heat" style="margin-bottom:14px">
+        <label for="track">Track</label>
+        <select id="track"></select>
+        <button class="ghost" id="skip" style="padding:6px 12px;font-size:13px">Different question</button>
+      </div>
+
+      <div class="drill-head">
+        <h2 id="drill-title">&nbsp;</h2>
+        <span class="badge" id="drill-badge">&nbsp;</span>
+      </div>
+
+      <div class="table-cards hidden" id="drill-cards"></div>
+      <p class="scenario" id="drill-scenario"></p>
+      <p class="question" id="drill-question"></p>
+
+      <form id="answer-form" class="answer-row">
+        <input type="text" id="answer-input" inputmode="decimal" autocomplete="off" aria-label="Your answer">
+        <span class="unit" id="answer-unit"></span>
+        <button type="submit" class="primary" id="submit-btn">Lock it in</button>
+        <button type="button" class="ghost" id="giveup-btn">I have no idea</button>
+      </form>
+      <div class="choices hidden" id="answer-choices"></div>
+      <div class="error" id="answer-error"></div>
+
+      <div class="verdict hidden" id="verdict">
+        <div class="headline" id="verdict-headline"></div>
+        <div class="working" id="verdict-working"></div>
+        <p class="muted" id="verdict-note"></p>
+        <button class="primary" id="next-btn">Next hand</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------- equity lab ---------------- -->
+  <div id="view-lab" role="tabpanel" aria-labelledby="tab-lab" class="hidden">
+    <div class="panel">
+      <h2>Equity lab</h2>
+      <p class="muted">Type real hands in and see the truth. Two letters per card: rank then suit, like <code>AhKd</code>. Leave villain blank to run against random holdings.</p>
+      <div class="lab-grid" style="margin-top:16px">
+        <div class="field"><label for="lab-hero">Your hand</label><input type="text" id="lab-hero" value="AhKh" autocomplete="off"></div>
+        <div class="field"><label for="lab-villain">Villain (optional)</label><input type="text" id="lab-villain" value="QsQd" autocomplete="off"></div>
+        <div class="field"><label for="lab-board">Board (0&ndash;5 cards)</label><input type="text" id="lab-board" value="" autocomplete="off"></div>
+        <div class="field"><label for="lab-opponents">Random opponents</label><input type="number" id="lab-opponents" value="1" min="1" max="9"></div>
+      </div>
+      <div class="answer-row" style="margin-top:16px">
+        <button class="primary" id="lab-run">Run it</button>
+        <button class="ghost" id="lab-deal">Deal me something</button>
+      </div>
+      <div class="error" id="lab-error"></div>
+      <div id="lab-cards" class="table-cards hidden"></div>
+      <div id="lab-result" class="hidden">
+        <div class="working" id="lab-summary"></div>
+        <table id="lab-table"></table>
+        <div id="lab-outs" class="muted" style="margin-top:14px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------- report card ---------------- -->
+  <div id="view-stats" role="tabpanel" aria-labelledby="tab-stats" class="hidden">
+    <div class="panel">
+      <h2>Report card</h2>
+      <p class="muted" id="stats-verdict"></p>
+      <table id="stats-table" style="margin-top:14px"></table>
+      <div class="answer-row" style="margin-top:18px">
+        <button class="ghost" id="reset-stats">Burn the evidence</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------------- cheat sheet ---------------- -->
+  <div id="view-sheet" role="tabpanel" aria-labelledby="tab-sheet" class="hidden">
+    <div class="panel">
+      <h2>The whole course, on one card</h2>
+
+      <h3>Pot odds</h3>
+      <div class="working">needed equity = call / (pot + call + call)</div>
+      <p class="muted">Villain bets 50 into 100. You pay 50 to win 150, so you need 50/200 = 25%. Your own call sits in the denominator &mdash; that is the step people fluff.</p>
+
+      <h3>Bluff break-even</h3>
+      <div class="working">fold % needed = bet / (pot + bet)</div>
+      <p class="muted">Half pot needs them folding 33%. Pot needs 50%. Overbets need more than half the time, which is why they should carry real hands too.</p>
+
+      <h3>Minimum defence frequency</h3>
+      <div class="working">defend = pot / (pot + bet)</div>
+      <p class="muted">Fold more than that and any two cards beats you. It is a ceiling on folding, not permission to call forever.</p>
+
+      <h3>Outs, and the rule of 2 and 4</h3>
+      <div class="working">flop &rarr; outs &times; 4    turn &rarr; outs &times; 2</div>
+      <p class="muted">Flush draw 9, open-ended straight 8, gutshot 4, overcards 6, flush + gutshot 12. Past about 8 outs the rule of 4 flatters you &mdash; knock a couple of points off.</p>
+
+      <h3>Preflop anchors worth memorising</h3>
+      <table>
+        <tr><th>Matchup</th><th class="num">Favourite</th></tr>
+        <tr><td>Pair vs two lower cards</td><td class="num">83%</td></tr>
+        <tr><td>Pair vs one overcard</td><td class="num">70%</td></tr>
+        <tr><td>Pair vs two overcards (the flip)</td><td class="num">55%</td></tr>
+        <tr><td>Dominated ace (AK vs AQ)</td><td class="num">73%</td></tr>
+        <tr><td>Two overcards vs two unders</td><td class="num">62%</td></tr>
+      </table>
+
+      <h3>Implied odds</h3>
+      <div class="working">extra needed = call / equity &minus; (pot + call)</div>
+      <p class="muted">Only real if the stacks are deep enough AND they will actually pay. Against someone who folds every river, implied odds are a bedtime story.</p>
+
+      <h3>Expected value of a call</h3>
+      <div class="working">EV = equity &times; (pot + call) &minus; (1 &minus; equity) &times; call</div>
+      <p class="muted">Positive means call, even when it loses this time. Especially when it loses this time.</p>
+    </div>
+  </div>
+
+  <p class="muted" style="text-align:center">
+    Play money only. Vic is a fictional grump and none of this is financial advice.
+  </p>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
