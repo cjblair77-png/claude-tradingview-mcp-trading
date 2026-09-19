@@ -13,19 +13,43 @@ npm run test:poker     # the maths and the coach, verified
 No dependencies, no build step, no bundler. Plain ES modules served over HTTP
 by a 40-line static server.
 
-## The teaching method
+## Educate: learn it instead of guessing it
+
+The important button. When you look at a question and have no idea where to
+even start, **Educate me** walks the maths with you *before* you answer, one
+step per click, at your pace:
+
+```
+WORKING IT OUT                                              Step 3 of 4
+1  If the bluff works, what do you win? Just what is there        200
+2  If it fails, what do you lose? Your bet                        100
+3  Break-even is risk ÷ (risk + reward)            100 ÷ (100 + 200)
+                                                 [ Next step ]
+```
+
+The clock stops while you are being taught. At the end the button becomes
+**"Got it — give me one like it"**, and you immediately get a fresh question of
+the *same skill with different numbers*, so the method gets used while it is
+still warm. Being shown how is not the same as knowing how — the twin is the
+part that sticks.
+
+A walkthrough is worth a quarter of answering one yourself, and it keeps that
+skill coming back in the rotation until you can do it unaided. The report card
+counts them in a **Taught** column, so guessing your way to a good grade and
+learning your way to one look different.
+
+## The rest of the teaching method
 
 Never say "wrong" without immediately showing the staircase you should have
-walked up. Every question carries three things beyond its answer:
+walked up. Beyond Educate, every question carries:
 
-- **a hint** you can ask for *before* answering — a nudge, not the answer
-- **the steps**, the whole thing cut into toddler-sized pieces, each one a
-  single sentence with real numbers in it
+- **a hint** — *Just a nudge*, for when you know the method but want a pointer
+- **the steps**, shown automatically after a miss so you never have to ask for
+  help after already feeling stupid
 - **a note**, the thing to actually remember
 
-Miss one and the steps appear automatically — you never have to ask for help
-after getting it wrong. Get it right and they are one click away, or always on
-if you leave **Explain like I'm four** ticked.
+Get it right and the steps are one click away, or always on if you leave
+**Explain like I'm four** ticked.
 
 ```
 1  Money already in the middle                                          20

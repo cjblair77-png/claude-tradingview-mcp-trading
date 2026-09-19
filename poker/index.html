@@ -81,12 +81,23 @@
 
       <!-- Outside the form so they are there for multiple-choice drills too. -->
       <div class="answer-row aux" id="answer-aux">
-        <button type="button" class="ghost" id="hint-btn">Nudge me</button>
-        <button type="button" class="ghost" id="giveup-btn">No idea</button>
+        <button type="button" class="teach" id="educate-btn">Educate me</button>
+        <button type="button" class="ghost" id="hint-btn">Just a nudge</button>
+        <button type="button" class="ghost" id="giveup-btn">Skip it</button>
       </div>
       <div class="error" id="answer-error"></div>
 
       <div class="hintbox hidden" id="hintbox"></div>
+
+      <!-- Educate: walk the maths BEFORE answering, one step per click. -->
+      <div class="walkthrough hidden" id="walkthrough">
+        <div class="walk-head">
+          <span class="walk-title">Working it out</span>
+          <span class="walk-progress" id="walk-progress"></span>
+        </div>
+        <ol class="steps" id="walk-steps"></ol>
+        <button class="primary" id="walk-next">Next step</button>
+      </div>
 
       <div class="verdict hidden" id="verdict">
         <div class="headline" id="verdict-headline"></div>
@@ -135,8 +146,10 @@
       <table id="stats-table" style="margin-top:14px"></table>
       <p class="muted" style="margin-top:14px">
         <b>Mastery</b> is a rolling average, so it moves fast &mdash; recent hands count most.
-        <b>Level</b> is how ugly the numbers get, and it is tracked per skill: nail one
-        thing and that thing alone gets harder.
+        <b>Taught</b> counts the times you hit Educate; a walkthrough is worth a
+        quarter of answering one yourself, and it keeps that skill coming back until
+        you can do it unaided. <b>Level</b> is how ugly the numbers get, tracked per
+        skill: nail one thing and that thing alone gets harder.
       </p>
       <div class="answer-row" style="margin-top:18px">
         <button class="ghost" id="reset-stats">Burn the evidence</button>

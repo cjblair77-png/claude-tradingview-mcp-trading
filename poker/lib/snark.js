@@ -66,6 +66,16 @@ const LINES = {
     ['Promoted to {belt}. Harder numbers from here, obviously.', "{belt}. Don't get comfortable, I've tightened the grading.", 'Up you go: {belt}. New drills, tighter margins.'],
     ["Promoted: {belt}. Right, no more baby numbers, you've earned the ugly ones.", "{belt}. Bloody hell. Fine, difficulty up.", "{belt}. I've tightened the grading out of spite. Enjoy."],
   ],
+  twin: [
+    ['Now do one yourself. Same maths, new numbers.', 'Your turn. Same shape, different figures.', 'Right — same sum, you drive.'],
+    ["Right. Now you do one, while it's still warm.", 'Your turn. Same maths, new numbers, no hand-holding.', "Go on then. Same thing, you drive."],
+    ["Right, now you fucking do one. Same maths, new numbers.", "Your turn, and no crying.", "Go on. Same sum. Off you go."],
+  ],
+  learned: [
+    ['There it is — you just did that one yourself.', 'That is the one I walked you through. Well done.', 'Learned and applied. That is how it works.'],
+    ['There it is. Walked through, then done solo. That is learning.', "See? You could do it all along, you just didn't know the order.", 'That is the whole trick: shown once, then done yourself.'],
+    ["There it fucking is. Taught, then done solo.", "See, you could do it. You just needed the order of operations and a shove.", 'Shown once, nailed once. That is how this works.'],
+  ],
   fast: [
     ['Correct and quick. That is the goal.', 'Fast and right. Good.', 'Quick. That matters at a real table.'],
     ['Quick AND right. Now we are getting somewhere.', "Fast. Good — the clock is part of the game.", 'Snappy. Keep that.'],

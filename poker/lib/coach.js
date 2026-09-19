@@ -32,6 +32,7 @@ const TARGET_SECONDS = {
 const ALPHA = 0.34; // how fast mastery reacts. High, because so should you.
 const MASTERY_FOR_HARDER = 0.85;
 const MASTERY_FOR_EASIER = 0.4;
+const TAUGHT_CREDIT = 0.25; // what a walkthrough is worth against a real answer
 
 export function createProgress() {
   return { belt: 0, hands: 0, handsAtBelt: 0, lastType: null, types: {} };
@@ -39,7 +40,7 @@ export function createProgress() {
 
 function slot(progress, type) {
   if (!progress.types[type]) {
-    progress.types[type] = { seen: 0, mastery: 0, lastSeenAt: -99, totalMs: 0, bestMs: null, bump: 0 };
+    progress.types[type] = { seen: 0, taught: 0, mastery: 0, lastSeenAt: -99, totalMs: 0, timed: 0, bestMs: null };
   }
   return progress.types[type];
 }
@@ -117,8 +118,12 @@ export function recordAnswer(progress, { type, score, ms = 0 }) {
   entry.seen += 1;
   entry.mastery = entry.mastery + ALPHA * (score - entry.mastery);
   entry.lastSeenAt = progress.hands;
-  entry.totalMs += ms;
-  if (score === 1 && (entry.bestMs === null || ms < entry.bestMs)) entry.bestMs = ms;
+  // Untimed hands (a walkthrough) must not drag the average down to nothing.
+  if (ms > 0) {
+    entry.totalMs += ms;
+    entry.timed += 1;
+    if (score === 1 && (entry.bestMs === null || ms < entry.bestMs)) entry.bestMs = ms;
+  }
 
   progress.hands += 1;
   progress.handsAtBelt += 1;
@@ -130,6 +135,22 @@ export function recordAnswer(progress, { type, score, ms = 0 }) {
     slow: score === 1 && ms > target * 1.8,
     mastery: entry.mastery,
   };
+}
+
+/**
+ * Being walked through a question is not the same as answering one. It counts
+ * as a small amount of mastery — you did engage with the method — and it keeps
+ * the concept hot in the selector, so the twin question that follows and the
+ * ones after it keep coming until you can do it unaided.
+ */
+export function recordTaught(progress, type) {
+  const entry = slot(progress, type);
+  entry.taught += 1;
+  entry.mastery = entry.mastery + ALPHA * (TAUGHT_CREDIT - entry.mastery);
+  entry.lastSeenAt = progress.hands;
+  // Deliberately does NOT set lastType: the whole point is that the very next
+  // question is this same skill again, and after that it should keep coming.
+  return entry.mastery;
 }
 
 /**
@@ -175,8 +196,9 @@ export function report(progress) {
         type,
         label: DRILLS[type].label,
         seen: entry?.seen ?? 0,
+        taught: entry?.taught ?? 0,
         mastery: entry?.mastery ?? 0,
-        avgSeconds: entry?.seen ? entry.totalMs / entry.seen / 1000 : null,
+        avgSeconds: entry?.timed ? entry.totalMs / entry.timed / 1000 : null,
         bestSeconds: entry?.bestMs === null || entry?.bestMs === undefined ? null : entry.bestMs / 1000,
         difficulty: difficultyFor(progress, type),
       };

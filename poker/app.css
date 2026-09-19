@@ -269,3 +269,29 @@ ol.steps li::before {
 
 .answer-row.aux { margin-top: 2px; gap: 8px; }
 .answer-row.aux button { padding: 8px 14px; font-size: 13px; }
+
+/* ---------- educate ---------- */
+
+button.teach {
+  background: rgba(224,178,76,0.14); color: var(--gold);
+  border: 1px solid rgba(224,178,76,0.55); border-radius: 10px;
+  padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  font-family: inherit;
+}
+button.teach:hover { background: rgba(224,178,76,0.24); }
+
+.walkthrough {
+  margin-top: 16px; padding: 16px 18px;
+  background: rgba(0,0,0,0.22); border: 1px solid rgba(224,178,76,0.3);
+  border-radius: var(--radius);
+}
+.walk-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px;
+}
+.walk-title {
+  font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold);
+}
+.walk-progress { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); }
+.walkthrough ol.steps li:last-child { border-bottom: none; }
+.walkthrough .primary { margin-top: 12px; }

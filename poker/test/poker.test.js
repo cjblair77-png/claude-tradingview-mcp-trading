@@ -14,7 +14,7 @@ import { grade, MOOD, say } from '../lib/snark.js';
 import { DRILLS, makeDrill } from '../lib/drills.js';
 import {
   BELTS, beltProgress, checkBelt, chooseNext, createProgress, difficultyFor,
-  masteryOf, recordAnswer, report, unlockedTypes,
+  masteryOf, recordAnswer, recordTaught, report, unlockedTypes,
 } from '../lib/coach.js';
 
 const cat = (s) => evaluate(parseCards(s)).category;
@@ -171,7 +171,8 @@ test('Vic fills in his templates at every mood', () => {
 test('the clean mood stays clean', () => {
   const rng = makeRng(31);
   const swears = /\b(fuck\w*|shit\w*|bastard|arse|bloody|christ)\b/i;
-  for (const kind of ['perfect', 'close', 'wrong', 'awful', 'streak', 'broken', 'greeting', 'toddler', 'hint', 'beltUp', 'fast', 'slow']) {
+  for (const kind of ['perfect', 'close', 'wrong', 'awful', 'streak', 'broken', 'greeting',
+    'toddler', 'hint', 'beltUp', 'fast', 'slow', 'twin', 'learned']) {
     for (let i = 0; i < 40; i += 1) {
       const line = say(kind, { mood: MOOD.CLEAN, vars: { answer: '25%', n: 3, belt: 'Reg' }, rng });
       assert.ok(!swears.test(line), `clean mood said: ${line}`);
@@ -322,4 +323,65 @@ test('the report names a weakest and strongest skill', () => {
   assert.ok(r.rows.every((row) => row.avgSeconds === null || row.avgSeconds > 0));
   assert.equal(r.belt.name, 'Fish');
   assert.equal(r.nextBelt.name, 'Limper');
+});
+
+
+/* ------------------------------ educate ------------------------------ */
+
+test('a walkthrough counts for something, but far less than answering', () => {
+  const p = createProgress();
+  recordTaught(p, 'pot-odds');
+  const taughtOnly = masteryOf(p, 'pot-odds');
+  assert.ok(taughtOnly > 0, 'being taught should register at all');
+
+  const q = createProgress();
+  recordAnswer(q, { type: 'pot-odds', score: 1, ms: 5000 });
+  assert.ok(masteryOf(q, 'pot-odds') > taughtOnly * 2,
+    'answering correctly must be worth much more than being shown');
+});
+
+test('walkthroughs keep the concept hot in the selector', () => {
+  const rng = makeRng(77);
+  const p = createProgress();
+  const pool = unlockedTypes(p);
+  for (const type of pool) {
+    for (let i = 0; i < 6; i += 1) recordAnswer(p, { type, score: 1, ms: 4000 });
+  }
+  // Now get walked through one of them — it should start coming up again.
+  for (let i = 0; i < 3; i += 1) recordTaught(p, 'call-ev');
+  // ...then answer something else, as you would after the twin question, so the
+  // don't-repeat-the-last-thing damping is not what we are measuring here.
+  recordAnswer(p, { type: 'reading', score: 1, ms: 4000 });
+
+  const counts = {};
+  for (let i = 0; i < 400; i += 1) {
+    const type = chooseNext(p, pool, rng);
+    counts[type] = (counts[type] || 0) + 1;
+  }
+  const others = Object.entries(counts).filter(([t]) => t !== 'call-ev').map(([, n]) => n);
+  assert.ok(counts['call-ev'] > Math.max(...others),
+    `walked-through skill picked ${counts['call-ev']}, best of the rest ${Math.max(...others)}`);
+});
+
+test('a walkthrough does not pollute the average answer time', () => {
+  const p = createProgress();
+  recordAnswer(p, { type: 'pot-odds', score: 1, ms: 10000 });
+  recordTaught(p, 'pot-odds');
+  recordAnswer(p, { type: 'pot-odds', score: 0, ms: 0 }); // untimed, e.g. a skip
+  const row = report(p).rows.find((r) => r.type === 'pot-odds');
+  assert.equal(row.avgSeconds, 10, 'only genuinely timed answers count toward the average');
+  assert.equal(row.taught, 1);
+});
+
+test('every drill can be walked through end to end', () => {
+  const rng = makeRng(404);
+  for (const type of Object.keys(DRILLS)) {
+    const d = makeDrill(type, rng);
+    // The walkthrough reveals one step per click and must terminate.
+    let index = 0;
+    while (index < d.steps.length) index += 1;
+    assert.equal(index, d.steps.length);
+    assert.ok(d.steps.length >= 4 && d.steps.length <= 8,
+      `${type} has ${d.steps.length} steps — too few to teach or too many to sit through`);
+  }
 });

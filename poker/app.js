@@ -5,7 +5,7 @@ import { cardsToPretty, cardsToString, deckWithout, drawRandom, parseCards, rank
 import { describe } from './lib/evaluator.js';
 import { countOuts, equityVsKnown, equityVsRandom, ruleOfTwoAndFour } from './lib/equity.js';
 import { CURRICULUM, DRILLS, makeDrill, trackDrills } from './lib/drills.js';
-import { beltProgress, checkBelt, chooseNext, createProgress, difficultyFor, recordAnswer, report, unlockedTypes } from './lib/coach.js';
+import { beltProgress, checkBelt, chooseNext, createProgress, difficultyFor, recordAnswer, recordTaught, report, unlockedTypes } from './lib/coach.js';
 import { grade, lesson, MOOD, say, VERDICT_SCORE } from './lib/snark.js';
 import { pct } from './lib/potmath.js';
 
@@ -22,6 +22,7 @@ const freshState = () => ({
   bestStreak: 0,
   answered: 0,
   points: 0,
+  taught: 0,
   progress: createProgress(),
 });
 
@@ -30,6 +31,7 @@ let current = null;
 let answered = false;
 let startedAt = 0;
 let tickHandle = null;
+let walkIndex = 0; // how far through an Educate walkthrough we are
 
 // localStorage is a nice-to-have: private windows and blocked site data both
 // throw, and the app has to work anyway.
@@ -129,12 +131,14 @@ function pickType() {
   return chooseNext(state.progress, pool);
 }
 
-function nextDrill() {
-  const type = pickType();
+function nextDrill(forcedType) {
+  const type = forcedType || pickType();
   current = makeDrill(type, Math.random, difficultyFor(state.progress, type));
+  current.isTwin = Boolean(forcedType);
   answered = false;
+  walkIndex = 0;
 
-  $('drill-title').textContent = current.title;
+  $('drill-title').textContent = current.isTwin ? `${current.title} — your turn` : current.title;
   $('drill-badge').textContent = `${current.label} · level ${current.difficulty + 1}`;
   $('drill-scenario').textContent = current.scenario;
   $('drill-question').textContent = current.question;
@@ -146,7 +150,11 @@ function nextDrill() {
   $('steps-btn').classList.remove('hidden');
   $('hint-btn').disabled = false;
   $('giveup-btn').disabled = false;
+  $('educate-btn').disabled = false;
+  $('educate-btn').textContent = 'Educate me';
   $('answer-aux').classList.remove('hidden');
+  $('walkthrough').classList.add('hidden');
+  $('walk-steps').innerHTML = '';
 
   renderSeats($('drill-cards'), [
     ['Your hand', current.cards?.hero],
@@ -176,6 +184,60 @@ function nextDrill() {
   }
 
   startClock();
+}
+
+/**
+ * Educate: walk the maths BEFORE answering, one step per click, then hand over
+ * a fresh question of the same type so the method gets used while it is still
+ * warm. Being shown how is not the same as knowing how — the twin is the part
+ * that actually sticks.
+ */
+function startWalkthrough() {
+  if (answered) return;
+  clearInterval(tickHandle);              // no clock pressure while being taught
+  walkIndex = 0;
+  answered = true;                        // this hand is a lesson, not an attempt
+
+  $('answer-form').classList.add('hidden');
+  $('answer-choices').classList.add('hidden');
+  $('answer-aux').classList.add('hidden');
+  $('hintbox').classList.add('hidden');
+  $('walk-steps').innerHTML = '';
+  $('walkthrough').classList.remove('hidden');
+
+  vicSays(`${line('toddler')} ${current.hint}`, current.topic);
+  advanceWalkthrough();
+}
+
+function advanceWalkthrough() {
+  const steps = current.steps;
+
+  if (walkIndex >= steps.length) {
+    // Walkthrough over. Bank the lesson and serve the same skill again.
+    state.taught += 1;
+    recordTaught(state.progress, current.type);
+    save();
+    renderScoreboard();
+    renderStats();
+    const type = current.type;
+    vicSays(line('twin'), current.topic);
+    nextDrill(type);
+    return;
+  }
+
+  const step = steps[walkIndex];
+  const li = document.createElement('li');
+  li.innerHTML = '<span class="step-do"></span><span class="step-result"></span>';
+  li.querySelector('.step-do').textContent = step.do;
+  li.querySelector('.step-result').textContent = step.result;
+  $('walk-steps').appendChild(li);
+
+  walkIndex += 1;
+  $('walk-progress').textContent = `Step ${walkIndex} of ${steps.length}`;
+  $('walk-next').textContent = walkIndex >= steps.length
+    ? 'Got it — give me one like it'
+    : 'Next step';
+  $('walk-next').focus();
 }
 
 function showHint() {
@@ -244,6 +306,8 @@ function resolve(verdict, clickedButton) {
     said = `${line(verdict, vars)} ${line('beltUp', { belt: beltMove.belt.name })}`;
   } else if (beltMove?.direction === 'down') {
     said = `${line(verdict, vars)} Back down to ${beltMove.belt.name} until you can hold it together.`;
+  } else if (perfect && current.isTwin) {
+    said = line('learned');
   } else if (perfect && pace.quick) {
     said = `${line('fast')} ${state.streak >= 3 ? line('streak', vars) : ''}`.trim();
   } else if (perfect && pace.slow) {
@@ -301,6 +365,7 @@ function renderScoreboard() {
     `Streak <b>${state.streak}</b>`,
     `Best <b>${state.bestStreak}</b>`,
     `Hands <b>${state.answered}</b>`,
+    `Taught <b>${state.taught || 0}</b>`,
     `Grade <b>${state.answered ? `${accuracy}%` : '—'}</b>`,
   ].map((t) => `<span class="chip">${t}</span>`).join('');
 
@@ -320,24 +385,29 @@ const RANKS_OF_SHAME = [
 function renderStats() {
   const r = report(state.progress);
 
-  $('stats-table').innerHTML = `<tr><th>Skill</th><th class="num">Hands</th><th class="num">Mastery</th><th style="width:22%">&nbsp;</th><th class="num">Avg</th><th class="num">Level</th></tr>` +
+  const touched = (row) => row.seen || row.taught;
+  $('stats-table').innerHTML = `<tr><th>Skill</th><th class="num">Hands</th><th class="num">Taught</th><th class="num">Mastery</th><th style="width:20%">&nbsp;</th><th class="num">Avg</th><th class="num">Level</th></tr>` +
     r.rows.map((row) => `<tr>
       <td>${row.label}</td>
       <td class="num">${row.seen || '—'}</td>
-      <td class="num">${row.seen ? `${Math.round(row.mastery * 100)}%` : '—'}</td>
-      <td>${row.seen ? `<div class="bar"><span style="width:${Math.round(row.mastery * 100)}%"></span></div>` : ''}</td>
+      <td class="num">${row.taught || '—'}</td>
+      <td class="num">${touched(row) ? `${Math.round(row.mastery * 100)}%` : '—'}</td>
+      <td>${touched(row) ? `<div class="bar"><span style="width:${Math.round(row.mastery * 100)}%"></span></div>` : ''}</td>
       <td class="num">${row.avgSeconds ? `${row.avgSeconds.toFixed(1)}s` : '—'}</td>
-      <td class="num">${row.seen ? row.difficulty + 1 : '—'}</td>
+      <td class="num">${touched(row) ? row.difficulty + 1 : '—'}</td>
     </tr>`).join('');
 
   if (!state.answered) {
-    $('stats-verdict').textContent = 'No hands played yet. A blank report card is the only kind you have ever enjoyed.';
+    $('stats-verdict').textContent = state.taught
+      ? `${state.taught} walked through, none answered yet. Reading the recipe is not cooking.`
+      : 'No hands played yet. A blank report card is the only kind you have ever enjoyed.';
     return;
   }
 
   const grade100 = (state.points / state.answered) * 100;
   const verdict = [...RANKS_OF_SHAME].reverse().find(([floor]) => grade100 >= floor)[1];
-  const parts = [`${r.belt.name} — ${r.belt.blurb}`, `${state.answered} hands, ${Math.round(grade100)}% overall.`, verdict];
+  const parts = [`${r.belt.name} — ${r.belt.blurb}`, `${state.answered} hand${state.answered === 1 ? '' : 's'}, ${Math.round(grade100)}% overall.`, verdict];
+  if (state.taught) parts.push(`${state.taught} walked through with Educate.`);
   if (r.weakest && r.weakest.mastery < 0.7) {
     parts.push(`Biggest leak: ${r.weakest.label} at ${Math.round(r.weakest.mastery * 100)}%. Vic is feeding you extra of those on purpose.`);
   }
@@ -448,9 +518,11 @@ function boot() {
   $('answer-form').addEventListener('submit', submitNumber);
   $('giveup-btn').addEventListener('click', giveUp);
   $('hint-btn').addEventListener('click', showHint);
+  $('educate-btn').addEventListener('click', startWalkthrough);
+  $('walk-next').addEventListener('click', advanceWalkthrough);
   $('steps-btn').addEventListener('click', showSteps);
-  $('next-btn').addEventListener('click', nextDrill);
-  $('skip').addEventListener('click', nextDrill);
+  $('next-btn').addEventListener('click', () => nextDrill());
+  $('skip').addEventListener('click', () => nextDrill());
 
   $('track').addEventListener('change', (e) => { state.track = e.target.value; save(); nextDrill(); });
   $('toddler').addEventListener('change', (e) => { state.toddler = e.target.checked; save(); });
