@@ -1,33 +1,35 @@
-// UI wiring. All the poker lives in lib/ — this file only moves text around,
-// keeps score, and makes sure Vic gets the last word.
+// UI wiring. All the poker lives in lib/ — this file moves text around, runs
+// the clock, and makes sure Vic gets the last word.
 
 import { cardsToPretty, cardsToString, deckWithout, drawRandom, parseCards, rankOf, suitCharOf, SUIT_SYMBOL, VALUE_RANK } from './lib/cards.js';
 import { describe } from './lib/evaluator.js';
 import { countOuts, equityVsKnown, equityVsRandom, ruleOfTwoAndFour } from './lib/equity.js';
-import { CURRICULUM, DRILLS, makeFromTrack } from './lib/drills.js';
-import { grade, HEAT, lesson, say, VERDICT_SCORE } from './lib/snark.js';
+import { CURRICULUM, DRILLS, makeDrill, trackDrills } from './lib/drills.js';
+import { beltProgress, checkBelt, chooseNext, createProgress, difficultyFor, recordAnswer, report, unlockedTypes } from './lib/coach.js';
+import { grade, lesson, MOOD, say, VERDICT_SCORE } from './lib/snark.js';
 import { pct } from './lib/potmath.js';
 
 const $ = (id) => document.getElementById(id);
-const STORE_KEY = 'shark-school/v1';
+const STORE_KEY = 'shark-school/v2';
 
 /* ------------------------------ state ------------------------------ */
 
-const blankStats = () => ({
+const freshState = () => ({
+  mood: MOOD.CHEEKY,
+  track: 'auto',
+  toddler: true,
   streak: 0,
   bestStreak: 0,
   answered: 0,
   points: 0,
-  byType: {},
+  progress: createProgress(),
 });
 
-let state = {
-  heat: HEAT.CHEEKY,
-  track: 'starter',
-  stats: blankStats(),
-};
+let state = freshState();
 let current = null;
 let answered = false;
+let startedAt = 0;
+let tickHandle = null;
 
 // localStorage is a nice-to-have: private windows and blocked site data both
 // throw, and the app has to work anyway.
@@ -36,7 +38,7 @@ function load() {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return;
     const saved = JSON.parse(raw);
-    state = { ...state, ...saved, stats: { ...blankStats(), ...(saved.stats || {}) } };
+    state = { ...freshState(), ...saved, progress: { ...createProgress(), ...(saved.progress || {}) } };
   } catch { /* first visit, or storage is off. Carry on. */ }
 }
 
@@ -83,6 +85,8 @@ function vicSays(text, topic) {
   $('vic-lesson').classList.toggle('hidden', !note);
 }
 
+const line = (kind, vars) => say(kind, { mood: state.mood, vars: vars || {} });
+
 /**
  * Accepts "25", "25%", ".25" and "0.25" for a percentage question — people
  * type what they think in, and arguing about format teaches nobody anything.
@@ -90,24 +94,59 @@ function vicSays(text, topic) {
 function readNumber(raw, drill) {
   const cleaned = String(raw).replace(/[%,\s]/g, '');
   if (cleaned === '') return NaN;
-  let value = Number(cleaned);
+  const value = Number(cleaned);
   if (!Number.isFinite(value)) return NaN;
-  if (drill.unit === '%' && value > 0 && value <= 1 && drill.answer > 1.5) value *= 100;
+  if (drill.unit === '%' && value > 0 && value <= 1 && drill.answer > 1.5) return value * 100;
   return value;
+}
+
+/* ------------------------------ the clock ------------------------------ */
+
+function startClock() {
+  startedAt = performance.now();
+  clearInterval(tickHandle);
+  tickHandle = setInterval(() => {
+    $('timer').textContent = `${((performance.now() - startedAt) / 1000).toFixed(1)}s`;
+  }, 100);
+}
+
+function stopClock() {
+  clearInterval(tickHandle);
+  const ms = performance.now() - startedAt;
+  $('timer').textContent = `${(ms / 1000).toFixed(1)}s`;
+  return ms;
 }
 
 /* ------------------------------ drills ------------------------------ */
 
+/**
+ * Even on a hand-picked track the coach chooses WITHIN it, so your weakest
+ * skill in that track still comes up most. "Auto" just widens the pool to
+ * everything your belt has unlocked.
+ */
+function pickType() {
+  const pool = state.track === 'auto' ? unlockedTypes(state.progress) : trackDrills(state.track);
+  return chooseNext(state.progress, pool);
+}
+
 function nextDrill() {
-  current = makeFromTrack(state.track);
+  const type = pickType();
+  current = makeDrill(type, Math.random, difficultyFor(state.progress, type));
   answered = false;
 
   $('drill-title').textContent = current.title;
-  $('drill-badge').textContent = `Level ${current.level}`;
+  $('drill-badge').textContent = `${current.label} · level ${current.difficulty + 1}`;
   $('drill-scenario').textContent = current.scenario;
   $('drill-question').textContent = current.question;
   $('answer-error').textContent = '';
   $('verdict').classList.add('hidden');
+  $('hintbox').classList.add('hidden');
+  $('steps').classList.add('hidden');
+  $('steps').innerHTML = '';
+  $('steps-btn').classList.remove('hidden');
+  $('hint-btn').disabled = false;
+  $('giveup-btn').disabled = false;
+  $('answer-aux').classList.remove('hidden');
 
   renderSeats($('drill-cards'), [
     ['Your hand', current.cards?.hero],
@@ -131,10 +170,36 @@ function nextDrill() {
       const b = document.createElement('button');
       b.type = 'button';
       b.textContent = choice;
-      b.addEventListener('click', () => resolve(choice, choice === current.answer ? 'perfect' : 'wrong', b));
+      b.addEventListener('click', () => resolve(choice === current.answer ? 'perfect' : 'wrong', b));
       box.appendChild(b);
     });
   }
+
+  startClock();
+}
+
+function showHint() {
+  if (answered) return;
+  $('hintbox').textContent = `${line('hint')} — ${current.hint}`;
+  $('hintbox').classList.remove('hidden');
+  $('hint-btn').disabled = true;
+}
+
+/** Reveal the staircase, one step at a time so it reads like being taught. */
+function showSteps() {
+  const list = $('steps');
+  list.innerHTML = '';
+  list.classList.remove('hidden');
+  $('steps-btn').classList.add('hidden');
+
+  current.steps.forEach((step, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="step-do"></span><span class="step-result"></span>`;
+    li.querySelector('.step-do').textContent = step.do;
+    li.querySelector('.step-result').textContent = step.result;
+    li.style.animationDelay = `${i * 90}ms`;
+    list.appendChild(li);
+  });
 }
 
 function submitNumber(event) {
@@ -146,50 +211,57 @@ function submitNumber(event) {
     return;
   }
   $('answer-error').textContent = '';
-  resolve(value, grade(value, current.answer, current.tolerance));
+  resolve(grade(value, current.answer, current.tolerance));
 }
 
-function resolve(given, verdict, clickedButton) {
+function resolve(verdict, clickedButton) {
   if (answered) return;
   answered = true;
+  const ms = stopClock();
 
   const points = VERDICT_SCORE[verdict] ?? 0;
   const perfect = verdict === 'perfect';
 
-  // Streak bookkeeping happens before we choose a line, so Vic can react to it.
-  const brokenAt = state.stats.streak;
+  const brokenAt = state.streak;
   if (perfect) {
-    state.stats.streak += 1;
-    state.stats.bestStreak = Math.max(state.stats.bestStreak, state.stats.streak);
+    state.streak += 1;
+    state.bestStreak = Math.max(state.bestStreak, state.streak);
   } else {
-    state.stats.streak = 0;
+    state.streak = 0;
   }
-  state.stats.answered += 1;
-  state.stats.points += points;
+  state.answered += 1;
+  state.points += points;
 
-  const bucket = state.stats.byType[current.type] || { attempts: 0, points: 0 };
-  bucket.attempts += 1;
-  bucket.points += points;
-  state.stats.byType[current.type] = bucket;
+  const pace = recordAnswer(state.progress, { type: current.type, score: points, ms });
+  const beltMove = checkBelt(state.progress);
   save();
 
-  const opts = { heat: state.heat, vars: { answer: current.display, n: perfect ? state.stats.streak : brokenAt } };
-  let line;
-  if (perfect && state.stats.streak >= 3) line = say('streak', opts);
-  else if (!perfect && brokenAt >= 3) line = `${say('broken', opts)} ${say(verdict, opts)}`;
-  else line = say(verdict, opts);
-
-  vicSays(line, current.topic);
+  // Vic's line: belt news trumps everything, then streaks, then the verdict,
+  // with a word about pace when the answer was right.
+  const vars = { answer: current.display, n: perfect ? state.streak : brokenAt };
+  let said;
+  if (beltMove?.direction === 'up') {
+    said = `${line(verdict, vars)} ${line('beltUp', { belt: beltMove.belt.name })}`;
+  } else if (beltMove?.direction === 'down') {
+    said = `${line(verdict, vars)} Back down to ${beltMove.belt.name} until you can hold it together.`;
+  } else if (perfect && pace.quick) {
+    said = `${line('fast')} ${state.streak >= 3 ? line('streak', vars) : ''}`.trim();
+  } else if (perfect && pace.slow) {
+    said = line('slow');
+  } else if (perfect && state.streak >= 3) {
+    said = line('streak', vars);
+  } else if (!perfect && brokenAt >= 3) {
+    said = `${line('broken', vars)} ${line(verdict, vars)}`;
+  } else {
+    said = line(verdict, vars);
+  }
+  vicSays(said, current.topic);
 
   const v = $('verdict');
   v.className = `verdict ${verdict}`;
-  $('verdict-headline').textContent = {
-    perfect: 'Correct.',
-    close: `Close — the answer was ${current.display}.`,
-    wrong: `Wrong — the answer was ${current.display}.`,
-    awful: `Wrong — the answer was ${current.display}.`,
-  }[verdict];
-  $('verdict-working').textContent = current.working;
+  $('verdict-headline').textContent = perfect
+    ? `Correct — ${current.display}. ${(ms / 1000).toFixed(1)}s.`
+    : `${verdict === 'close' ? 'Close' : 'Wrong'} — the answer was ${current.display}.`;
   $('verdict-note').textContent = current.note;
 
   if (current.mode === 'choice') {
@@ -201,6 +273,13 @@ function resolve(given, verdict, clickedButton) {
   } else {
     $('submit-btn').disabled = true;
   }
+  $('answer-aux').classList.add('hidden');
+
+  // Toddler mode: never make someone ask for the explanation after a miss.
+  if (state.toddler || !perfect) {
+    if (!perfect) vicSays(`${said} ${line('toddler')}`, current.topic);
+    showSteps();
+  }
 
   renderScoreboard();
   renderStats();
@@ -209,56 +288,63 @@ function resolve(given, verdict, clickedButton) {
 
 function giveUp() {
   if (answered) return;
-  resolve(NaN, 'awful');
+  resolve('awful');
 }
 
 /* ------------------------------ scoreboard ------------------------------ */
 
 function renderScoreboard() {
-  const s = state.stats;
-  const accuracy = s.answered ? Math.round((s.points / s.answered) * 100) : 0;
+  const r = report(state.progress);
+  const accuracy = state.answered ? Math.round((state.points / state.answered) * 100) : 0;
+
   $('scoreboard').innerHTML = [
-    `Streak <b>${s.streak}</b>`,
-    `Best <b>${s.bestStreak}</b>`,
-    `Hands <b>${s.answered}</b>`,
-    `Grade <b>${s.answered ? `${accuracy}%` : '—'}</b>`,
+    `Streak <b>${state.streak}</b>`,
+    `Best <b>${state.bestStreak}</b>`,
+    `Hands <b>${state.answered}</b>`,
+    `Grade <b>${state.answered ? `${accuracy}%` : '—'}</b>`,
   ].map((t) => `<span class="chip">${t}</span>`).join('');
+
+  $('belt-name').textContent = r.belt.name;
+  $('belt-next').textContent = r.nextBelt ? `→ ${r.nextBelt.name}` : 'top of the shop';
+  $('belt-bar').style.width = `${Math.round(beltProgress(state.progress) * 100)}%`;
 }
 
 const RANKS_OF_SHAME = [
   [0, 'Live one. Please keep playing, somewhere I can find you.'],
   [40, 'Break-even at best, and that is before the rake eats you.'],
-  [60, 'Competent. The word is "competent". Don\'t gild it.'],
+  [60, 'Competent. The word is "competent". Do not gild it.'],
   [78, 'Genuinely solid. I am looking for the catch.'],
-  [92, 'Fine. You can have the table. I\'ll take the drinks trolley.'],
+  [92, 'Fine. Take the table. I will take the drinks trolley.'],
 ];
 
 function renderStats() {
-  const s = state.stats;
-  const table = $('stats-table');
-  const rows = Object.entries(DRILLS).map(([type, meta]) => {
-    const b = s.byType[type];
-    const acc = b && b.attempts ? (b.points / b.attempts) * 100 : null;
-    return { label: meta.label, attempts: b?.attempts || 0, acc };
-  }).sort((a, b) => (b.attempts - a.attempts) || a.label.localeCompare(b.label));
+  const r = report(state.progress);
 
-  table.innerHTML = `<tr><th>Drill</th><th class="num">Hands</th><th class="num">Grade</th><th style="width:34%">&nbsp;</th></tr>` +
-    rows.map((r) => `<tr>
-      <td>${r.label}</td>
-      <td class="num">${r.attempts || '—'}</td>
-      <td class="num">${r.acc === null ? '—' : `${Math.round(r.acc)}%`}</td>
-      <td>${r.acc === null ? '' : `<div class="bar"><span style="width:${Math.round(r.acc)}%"></span></div>`}</td>
+  $('stats-table').innerHTML = `<tr><th>Skill</th><th class="num">Hands</th><th class="num">Mastery</th><th style="width:22%">&nbsp;</th><th class="num">Avg</th><th class="num">Level</th></tr>` +
+    r.rows.map((row) => `<tr>
+      <td>${row.label}</td>
+      <td class="num">${row.seen || '—'}</td>
+      <td class="num">${row.seen ? `${Math.round(row.mastery * 100)}%` : '—'}</td>
+      <td>${row.seen ? `<div class="bar"><span style="width:${Math.round(row.mastery * 100)}%"></span></div>` : ''}</td>
+      <td class="num">${row.avgSeconds ? `${row.avgSeconds.toFixed(1)}s` : '—'}</td>
+      <td class="num">${row.seen ? row.difficulty + 1 : '—'}</td>
     </tr>`).join('');
 
-  if (!s.answered) {
+  if (!state.answered) {
     $('stats-verdict').textContent = 'No hands played yet. A blank report card is the only kind you have ever enjoyed.';
     return;
   }
-  const grade100 = (s.points / s.answered) * 100;
+
+  const grade100 = (state.points / state.answered) * 100;
   const verdict = [...RANKS_OF_SHAME].reverse().find(([floor]) => grade100 >= floor)[1];
-  const worst = rows.filter((r) => r.attempts >= 3 && r.acc !== null).sort((a, b) => a.acc - b.acc)[0];
-  $('stats-verdict').textContent = `${s.answered} hands, ${Math.round(grade100)}% overall. ${verdict}` +
-    (worst && worst.acc < 70 ? ` Biggest leak: ${worst.label}. Go and drill it.` : '');
+  const parts = [`${r.belt.name} — ${r.belt.blurb}`, `${state.answered} hands, ${Math.round(grade100)}% overall.`, verdict];
+  if (r.weakest && r.weakest.mastery < 0.7) {
+    parts.push(`Biggest leak: ${r.weakest.label} at ${Math.round(r.weakest.mastery * 100)}%. Vic is feeding you extra of those on purpose.`);
+  }
+  if (r.strongest && r.strongest.mastery >= 0.85) {
+    parts.push(`${r.strongest.label} is solid, so it has been bumped to level ${r.strongest.difficulty + 1}.`);
+  }
+  $('stats-verdict').textContent = parts.join(' ');
 }
 
 /* ------------------------------ equity lab ------------------------------ */
@@ -301,12 +387,12 @@ function runLab() {
 
     $('lab-summary').textContent = summary;
     $('lab-table').innerHTML = `<tr><th>Seat</th><th class="num">Equity</th><th class="num">Win</th><th class="num">Tie</th><th>Holding</th></tr>` +
-      rows.map((r) => `<tr>
-        <td>${r.who}</td>
-        <td class="num">${pct(r.equity)}</td>
-        <td class="num">${r.win === null ? '—' : pct(r.win)}</td>
-        <td class="num">${r.tie === null ? '—' : pct(r.tie)}</td>
-        <td>${r.made}</td>
+      rows.map((row) => `<tr>
+        <td>${row.who}</td>
+        <td class="num">${pct(row.equity)}</td>
+        <td class="num">${row.win === null ? '—' : pct(row.win)}</td>
+        <td class="num">${row.tie === null ? '—' : pct(row.tie)}</td>
+        <td>${row.made}</td>
       </tr>`).join('');
 
     const outsBox = $('lab-outs');
@@ -316,14 +402,13 @@ function runLab() {
       const rule = ruleOfTwoAndFour(o.count, street);
       outsBox.textContent = o.behind
         ? `You are behind with ${o.count} out${o.count === 1 ? '' : 's'} (${cardsToPretty(o.outs)}). Rule of ${street === 'flop' ? '4' : '2'} says ≈${pct(rule.approx)}; the real number ${street === 'flop' ? 'by the river' : 'on the river'} is ${pct(rule.exact)}.`
-        : `You are ahead. ${o.count} of the ${o.live} remaining cards keep you ahead on the next street — the other ${o.live - o.count} are villain's outs.`;
-      outsBox.classList.remove('hidden');
+        : `You are ahead. ${o.count} of the ${o.live} remaining cards keep you ahead next street — the other ${o.live - o.count} are villain's outs.`;
     } else {
       outsBox.textContent = '';
     }
 
     $('lab-result').classList.remove('hidden');
-    vicSays(`${pct(rows[0].equity)}. The numbers don't care what you were hoping for.`, 'equity');
+    vicSays(`${pct(rows[0].equity)}. The numbers do not care what you were hoping for.`, 'equity');
   } catch (e) {
     err.textContent = e.message;
     $('lab-result').classList.add('hidden');
@@ -332,8 +417,6 @@ function runLab() {
 
 function dealLab() {
   const draw = drawRandom(deckWithout([]), 9);
-  $('lab-hero').value = cardsToString(draw.slice(0, 2)).replace(/[♠♥♦♣]/g, '');
-  // Re-render from ids rather than symbols so the inputs stay parseable.
   const asText = (cards) => cardsToString(cards).replace(/ /g, '');
   $('lab-hero').value = asText(draw.slice(0, 2));
   $('lab-villain').value = asText(draw.slice(2, 4));
@@ -357,24 +440,24 @@ function boot() {
 
   $('track').innerHTML = CURRICULUM.map((t) => `<option value="${t.id}">${t.label}</option>`).join('');
   $('track').value = state.track;
-  $('heat').value = String(state.heat);
+  $('mood').value = String(state.mood);
+  $('toddler').checked = state.toddler;
 
   TABS.forEach((t) => $(`tab-${t}`).addEventListener('click', () => showTab(t)));
 
   $('answer-form').addEventListener('submit', submitNumber);
   $('giveup-btn').addEventListener('click', giveUp);
+  $('hint-btn').addEventListener('click', showHint);
+  $('steps-btn').addEventListener('click', showSteps);
   $('next-btn').addEventListener('click', nextDrill);
   $('skip').addEventListener('click', nextDrill);
 
-  $('track').addEventListener('change', (e) => {
-    state.track = e.target.value;
+  $('track').addEventListener('change', (e) => { state.track = e.target.value; save(); nextDrill(); });
+  $('toddler').addEventListener('change', (e) => { state.toddler = e.target.checked; save(); });
+  $('mood').addEventListener('change', (e) => {
+    state.mood = Number(e.target.value);
     save();
-    nextDrill();
-  });
-  $('heat').addEventListener('change', (e) => {
-    state.heat = Number(e.target.value);
-    save();
-    vicSays(say('greeting', { heat: state.heat }));
+    vicSays(line('greeting'));
   });
 
   $('lab-run').addEventListener('click', runLab);
@@ -384,16 +467,18 @@ function boot() {
   });
 
   $('reset-stats').addEventListener('click', () => {
-    state.stats = blankStats();
+    const { mood, track, toddler } = state;
+    state = { ...freshState(), mood, track, toddler };
     save();
     renderScoreboard();
     renderStats();
     vicSays('Wiped. We both know what it said.');
+    nextDrill();
   });
 
   renderScoreboard();
   renderStats();
-  vicSays(say('greeting', { heat: state.heat }));
+  vicSays(line('greeting'));
   nextDrill();
 
   // A deliberate handle on the running app: handy in the console, and it lets

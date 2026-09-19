@@ -10,8 +10,12 @@ import { cardsToPretty, cardsToString, makeRng, parseCard, parseCards } from '..
 import { CATEGORY, compareHands, describe, evaluate } from '../lib/evaluator.js';
 import { countOuts, equityVsKnown, equityVsRandom, ruleOfTwoAndFour } from '../lib/equity.js';
 import { bluffBreakeven, callEV, impliedOdds, mdf, potOdds } from '../lib/potmath.js';
-import { grade, HEAT, say } from '../lib/snark.js';
+import { grade, MOOD, say } from '../lib/snark.js';
 import { DRILLS, makeDrill } from '../lib/drills.js';
+import {
+  BELTS, beltProgress, checkBelt, chooseNext, createProgress, difficultyFor,
+  masteryOf, recordAnswer, report, unlockedTypes,
+} from '../lib/coach.js';
 
 const cat = (s) => evaluate(parseCards(s)).category;
 
@@ -152,15 +156,27 @@ test('grading bands widen in the right order', () => {
   assert.equal(grade(80, 25, 1), 'awful');
 });
 
-test('Vic fills in his templates and honours the heat setting', () => {
+test('Vic fills in his templates at every mood', () => {
   const rng = makeRng(1);
-  for (const heat of [HEAT.POLITE, HEAT.CHEEKY, HEAT.BRUTAL]) {
-    const line = say('wrong', { heat, vars: { answer: '25%' }, rng });
+  for (const mood of [MOOD.CLEAN, MOOD.CHEEKY, MOOD.UNFILTERED]) {
+    const line = say('wrong', { mood, vars: { answer: '25%' }, rng });
     assert.ok(line.includes('25%'), line);
     assert.ok(!line.includes('{'), `unsubstituted placeholder: ${line}`);
   }
   assert.ok(say('streak', { vars: { n: 4 }, rng }).includes('4'));
+  assert.ok(say('beltUp', { vars: { belt: 'Shark' }, rng }).includes('Shark'));
   assert.throws(() => say('nonsense'));
+});
+
+test('the clean mood stays clean', () => {
+  const rng = makeRng(31);
+  const swears = /\b(fuck\w*|shit\w*|bastard|arse|bloody|christ)\b/i;
+  for (const kind of ['perfect', 'close', 'wrong', 'awful', 'streak', 'broken', 'greeting', 'toddler', 'hint', 'beltUp', 'fast', 'slow']) {
+    for (let i = 0; i < 40; i += 1) {
+      const line = say(kind, { mood: MOOD.CLEAN, vars: { answer: '25%', n: 3, belt: 'Reg' }, rng });
+      assert.ok(!swears.test(line), `clean mood said: ${line}`);
+    }
+  }
 });
 
 test('every drill generates a complete, answerable question', () => {
@@ -169,6 +185,18 @@ test('every drill generates a complete, answerable question', () => {
     for (let i = 0; i < 6; i += 1) {
       const d = makeDrill(type, rng);
       assert.ok(d.scenario && d.question && d.working && d.note, `${type} is missing copy`);
+      assert.ok(d.hint && d.hint.length > 20, `${type} has no usable hint`);
+      assert.ok(Array.isArray(d.steps) && d.steps.length >= 4, `${type} needs a real staircase`);
+      d.steps.forEach((step, n) => {
+        assert.ok(step.do && step.do.length > 3, `${type} step ${n} has no instruction`);
+        assert.ok(step.result !== undefined && String(step.result).length > 0, `${type} step ${n} shows no result`);
+      });
+      // The staircase has to actually arrive at the answer somewhere — a
+      // walkthrough that never reaches the number teaches nothing. (Some
+      // drills carry on past it, e.g. outs then converts to a percentage.)
+      const key = String(d.display).split(' ')[0];
+      assert.ok(d.steps.some((step) => String(step.result).includes(key)),
+        `${type} staircase never reaches ${d.display}`);
       assert.ok(d.display, `${type} has no answer to show`);
       if (d.mode === 'number') {
         assert.ok(Number.isFinite(d.answer), `${type} answer was ${d.answer}`);
@@ -190,4 +218,108 @@ test('the outs drill only ever asks about hands that are behind', () => {
     assert.equal(o.behind, true);
     assert.equal(o.count, d.answer);
   }
+});
+
+
+/* ------------------------------ the coach ------------------------------ */
+
+test('mastery rises with correct answers and falls with wrong ones', () => {
+  const p = createProgress();
+  for (let i = 0; i < 6; i += 1) recordAnswer(p, { type: 'pot-odds', score: 1, ms: 5000 });
+  assert.ok(masteryOf(p, 'pot-odds') > 0.85, masteryOf(p, 'pot-odds'));
+  for (let i = 0; i < 6; i += 1) recordAnswer(p, { type: 'pot-odds', score: 0, ms: 5000 });
+  assert.ok(masteryOf(p, 'pot-odds') < 0.15, masteryOf(p, 'pot-odds'));
+});
+
+test('pace is judged against the drill\'s own target time', () => {
+  const p = createProgress();
+  assert.equal(recordAnswer(p, { type: 'pot-odds', score: 1, ms: 3000 }).quick, true);
+  assert.equal(recordAnswer(p, { type: 'pot-odds', score: 1, ms: 40000 }).slow, true);
+  // A wrong answer is never "quick", however fast it was typed.
+  assert.equal(recordAnswer(p, { type: 'pot-odds', score: 0, ms: 300 }).quick, false);
+});
+
+test('the coach feeds you your weakest skill most often', () => {
+  const rng = makeRng(8);
+  const p = createProgress();
+  const pool = unlockedTypes(p);
+  for (const type of pool) {
+    for (let i = 0; i < 5; i += 1) {
+      recordAnswer(p, { type, score: type === 'reading' ? 0 : 1, ms: 5000 });
+    }
+  }
+  const counts = {};
+  for (let i = 0; i < 400; i += 1) {
+    const type = chooseNext(p, pool, rng);
+    counts[type] = (counts[type] || 0) + 1;
+  }
+  const others = Object.entries(counts).filter(([t]) => t !== 'reading').map(([, n]) => n);
+  assert.ok(counts.reading > Math.max(...others) * 1.5,
+    `weak skill picked ${counts.reading}, best of the rest ${Math.max(...others)}`);
+});
+
+test('the coach does not ask the same thing twice in a row', () => {
+  const rng = makeRng(12);
+  const p = createProgress();
+  const pool = unlockedTypes(p);
+  let repeats = 0;
+  for (let i = 0; i < 200; i += 1) {
+    const type = chooseNext(p, pool, rng);
+    if (type === p.lastType) repeats += 1;
+    recordAnswer(p, { type, score: 1, ms: 4000 });
+  }
+  assert.ok(repeats < 15, `${repeats} back-to-back repeats in 200`);
+});
+
+test('difficulty tracks each skill separately', () => {
+  const p = createProgress();
+  p.belt = 2; // Reg: baseline difficulty 1
+  for (let i = 0; i < 8; i += 1) recordAnswer(p, { type: 'pot-odds', score: 1, ms: 4000 });
+  for (let i = 0; i < 8; i += 1) recordAnswer(p, { type: 'outs', score: 0, ms: 4000 });
+  assert.equal(difficultyFor(p, 'pot-odds'), 2, 'mastered skill should get harder');
+  assert.equal(difficultyFor(p, 'outs'), 0, 'weak skill should get easier');
+  // Difficulty is a real knob: harder levels grade more tightly.
+  const rng = makeRng(5);
+  const easy = makeDrill('pot-odds', rng, 0);
+  const hard = makeDrill('pot-odds', rng, 2);
+  assert.ok(hard.tolerance < easy.tolerance);
+});
+
+test('belts unlock drills and promote on sustained mastery', () => {
+  const p = createProgress();
+  assert.deepEqual(unlockedTypes(p).sort(), ['bluff-breakeven', 'call-ev', 'pot-odds', 'reading'].sort());
+
+  let promotions = 0;
+  for (let i = 0; i < 200 && p.belt < BELTS.length - 1; i += 1) {
+    for (const type of unlockedTypes(p)) recordAnswer(p, { type, score: 1, ms: 4000 });
+    if (checkBelt(p)) promotions += 1;
+  }
+  assert.equal(p.belt, BELTS.length - 1);
+  assert.equal(promotions, BELTS.length - 1);
+  assert.ok(unlockedTypes(p).length === Object.keys(DRILLS).length, 'Shark should see everything');
+  assert.equal(beltProgress(p), 1);
+});
+
+test('a sustained collapse demotes you, but never past Limper', () => {
+  const p = createProgress();
+  p.belt = 3;
+  for (let i = 0; i < 200; i += 1) {
+    for (const type of unlockedTypes(p)) recordAnswer(p, { type, score: 0, ms: 4000 });
+    checkBelt(p);
+  }
+  assert.equal(p.belt, 1, 'demotion floors at Limper');
+});
+
+test('the report names a weakest and strongest skill', () => {
+  const p = createProgress();
+  for (let i = 0; i < 5; i += 1) {
+    recordAnswer(p, { type: 'pot-odds', score: 1, ms: 3000 });
+    recordAnswer(p, { type: 'reading', score: 0, ms: 9000 });
+  }
+  const r = report(p);
+  assert.equal(r.weakest.type, 'reading');
+  assert.equal(r.strongest.type, 'pot-odds');
+  assert.ok(r.rows.every((row) => row.avgSeconds === null || row.avgSeconds > 0));
+  assert.equal(r.belt.name, 'Fish');
+  assert.equal(r.nextBelt.name, 'Limper');
 });

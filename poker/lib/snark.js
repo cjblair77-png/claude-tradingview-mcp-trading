@@ -1,51 +1,80 @@
-// The instructor. His name is Vic, he has been dealt in since 1978, and he has
-// never once been impressed by anybody.
+// The instructor. His name is Vic, he has been dealt in since 1978, and he
+// teaches like you are four years old because — in his professional opinion —
+// at the poker table you are.
 //
-// House rules for the writing in here: the lines mock the ANSWER, the MATH, or
-// Vic's own ruined career. They never mock the player for anything they did not
-// just type into the box. Keep it a roast, not a bar fight.
-//
-// HEAT levels let the player dial it down (or up) — because "insulting" is fun
-// right up until it isn't, and that call belongs to the person being insulted.
+// House rules for the writing in here, and they are not negotiable:
+//   * Vic mocks the ANSWER, the MATH, or his own ruined career.
+//   * Vic never mocks the player for anything they did not just type in.
+//   * No slurs, no punching at who someone is. Swearing at arithmetic only.
+// MOOD lets the player dial the language, because "cheeky instructor" is fun
+// right up until it isn't, and that call belongs to the person being roasted.
 
-export const HEAT = { POLITE: 0, CHEEKY: 1, BRUTAL: 2 };
-export const HEAT_LABELS = ['Supportive', 'Cheeky', 'Brutal'];
+export const MOOD = { CLEAN: 0, CHEEKY: 1, UNFILTERED: 2 };
+export const MOOD_LABELS = ['Clean', 'Cheeky', 'Unfiltered'];
+
+// Back-compat alias — the drills and tests grew up calling it heat.
+export const HEAT = MOOD;
 
 const LINES = {
   perfect: [
-    ["Correct. Well done.", "Correct. Don't let it go to your head.", "Correct. A stopped clock, etc."],
-    ["Right on the number. I'm as surprised as you are.", "Correct. Somebody's been reading.", "Exactly right. Suspicious, but right.", "Nailed it. I'll allow one smug moment."],
-    ["Correct, which after that last effort feels like a typo.", "Right. Frame it, it won't happen twice.", "Perfect. The table will miss your money.", "Correct. Now do it when there's actual money on it, hero."],
+    ['Correct. Well done.', 'Correct. Next.', 'Right. Keep that shape in your head.'],
+    ["Correct, and you didn't even flinch.", 'Yes. Bloody good.', "Right. That's the one.", 'Correct. Look at you, doing maths.'],
+    ["Correct. Shit, you're learning.", 'Yes! Fucking finally.', 'Right. Do that on the felt and people will hate you.', "Correct. I'd buy you a drink but you'd only get cocky."],
   ],
   close: [
-    ["Close enough — the exact figure is {answer}.", "Nearly. {answer} is the number.", "Good instinct, slightly off: {answer}."],
-    ["Close. In poker, close pays the other guy. It's {answer}.", "Within spitting distance. {answer}.", "Nearly right, which is the most expensive kind of wrong. {answer}."],
-    ["Close! Also wrong. {answer}.", "You grazed it. The number is {answer}. Grazing is how bankrolls die.", "Almost. Rounding like that is a slow leak with good manners. {answer}."],
+    ['Close — it is {answer}. Look at step three again.', 'Nearly. {answer}.', 'Good instinct, slightly off: {answer}.'],
+    ['Close. Close pays the other guy. {answer}.', 'Nearly. {answer}. Tighten it up.', "So close I almost let it go. {answer}."],
+    ['Close, and close is how you go broke slowly. {answer}.', 'Nearly, you rounding bastard. {answer}.', "Arse. {answer}. You had it and you fumbled it."],
   ],
   wrong: [
-    ["Not quite — it's {answer}. Have another look at the working.", "That's off. The answer is {answer}.", "Miss. {answer} — the working is below."],
-    ["No. {answer}. Read the working before you argue with me.", "Wrong, and confidently so. {answer}.", "That's a fold. It's {answer}.", "Nope. {answer}. The pot was never going to be that generous."],
-    ["Wrong. {answer}. I've seen better arithmetic from the drinks trolley.", "No. {answer}. Whatever you did there, do it away from a card room.", "Incorrect. {answer}. That guess had the shape of a number and none of the content.", "Wrong. {answer}. Somewhere a recreational player just got a raise."],
+    ["Not quite — {answer}. Let's walk it through.", "That's off. {answer}.", 'Miss. {answer}. Read the steps.'],
+    ['No. {answer}. Crayons out, we are doing this together.', 'Wrong. {answer}.', "Nope. {answer}. Don't argue, just read it."],
+    ['No. {answer}. Bloody hell, mate.', 'Wrong. {answer}. Right, crayons out.', "Shit no. {answer}. Sit down, we're starting from the top.", 'Wrong. {answer}. Somewhere a fish just got a raise.'],
   ],
   awful: [
-    ["That's a long way off. It's {answer} — let's slow this one down.", "Well off. {answer}. Worth re-reading the section.", "Not close. {answer}."],
-    ["That's not in the same postcode. {answer}.", "Off by a mile. {answer}. Take the long road next time.", "No. {answer}. You didn't calculate that, you dowsed for it."],
-    ["That answer needs a search party. It's {answer}.", "{answer}. You were closer to the correct answer before you started thinking.", "No. {answer}. I've watched people shove drunk with more discipline than that.", "{answer}. That wasn't an estimate, that was a hostage note."],
+    ["Well off — {answer}. Slow down, we'll do it in steps.", 'Not close. {answer}. Read it twice.', 'A long way off. {answer}.'],
+    ["That's not in the same postcode. {answer}.", "Miles off. {answer}. You didn't work that out, you guessed.", 'No. {answer}. Deep breath, steps, go again.'],
+    ["What the fuck was that? {answer}.", "Christ. {answer}. That wasn't an estimate, it was a hostage note.", 'No. {answer}. You dowsed for that number with a stick.', 'Absolutely not. {answer}. I have seen drunks count better.'],
   ],
   streak: [
-    ["{n} in a row. Good work.", "{n} straight. Keep going.", "{n} correct. That's a habit forming."],
-    ["{n} in a row. Now I'm suspicious of the deck.", "{n} straight. Don't spend it all in one pot.", "{n} on the bounce. The math is starting to like you back."],
-    ["{n} in a row. Fine. FINE. You're competent. I hate it.", "{n} straight. This is where the average player starts to gamble it all back.", "{n} correct. Careful — feeling good at poker is the most expensive feeling there is."],
+    ['{n} in a row. Good.', '{n} straight. Keep going.', '{n} correct. That is a habit forming.'],
+    ["{n} in a row. Now I'm suspicious of the deck.", '{n} straight. Do not spend it all in one pot.', '{n} on the bounce. The maths is starting to like you back.'],
+    ["{n} in a row. Fine. FINE. You're good at this. I hate it.", "{n} straight, you show-off.", "{n} on the bounce. This is exactly where idiots start gambling it back."],
   ],
   broken: [
-    ["Streak over at {n}. It happens.", "And there goes the run. {n}.", "Streak ends at {n}. Start another."],
-    ["Streak dies at {n}. They always do.", "{n} and out. Poker is just a long apology.", "There it is. {n}, then reality."],
-    ["Streak over at {n}. I was drafting the plaque and everything.", "{n}, then that. Classic you.", "And the run ends. {n}. Pride comes before the river card."],
+    ['Streak over at {n}.', 'And there it goes. {n}.', 'Run ends at {n}. Start another.'],
+    ['Streak dies at {n}. They always do.', '{n} and out. Poker is one long apology.', 'There it is. {n}, then reality.'],
+    ['Streak dead at {n}. I was drafting the fucking plaque.', '{n}, then that. Classic.', 'And the run ends at {n}. Pride, meet river card.'],
   ],
   greeting: [
-    ["Right. Let's work on your game.", "Sit down, we'll start with the numbers.", "Welcome. Poker is a math test that takes your wallet."],
-    ["Sit. The math doesn't care how you feel about it.", "Let's find out what you actually know, as opposed to what you tell people at parties.", "Poker is arithmetic wearing a leather jacket. Begin."],
-    ["Sit down. I've seen your results. We have work to do.", "Let's establish a baseline for the disappointment.", "Poker rewards two things: math and patience. You've brought neither. Yet."],
+    ["Right. Let's work on your game. Small steps, quick progress.", 'Sit down. We start with the numbers.', 'Welcome. Poker is a maths test that takes your wallet.'],
+    ["Sit. I'll teach you like you're four, and you'll be dangerous by Friday.", "Right, let's find out what you actually know.", 'Poker is arithmetic in a leather jacket. Begin.'],
+    ["Sit down. I'm going to teach you like a toddler and you're going to thank me.", "Right. Let's find your leaks and beat them out of you.", "Poker's just sums, mate. Terrifying, expensive sums."],
+  ],
+  toddler: [
+    ["Here it is, one step at a time.", "Slowly, then. Step by step.", "Right, small pieces."],
+    ["Fine. Crayons out. One step at a time.", "Here, I'll hold your hand. Small steps.", "Right, tiny pieces, like cutting up a sausage."],
+    ["Crayons out. Tiny fucking steps, then.", "Fine. I'll do it slowly, like I'm explaining stairs.", "Right, hold my hand. One bit at a time."],
+  ],
+  hint: [
+    ['A nudge, not the answer.', 'Here is the shape of it.', 'Think about it like this.'],
+    ["I'll point, you walk.", "A nudge. Don't get used to it.", "Here's the trick of it."],
+    ["A nudge, you big baby.", "Fine, here's the trick. Don't ask twice.", "I'll point. You still have to do the walking."],
+  ],
+  beltUp: [
+    ['Promoted: {belt}. The questions get harder now.', 'You have earned {belt}. New drills unlocked.', '{belt}. Well done — difficulty up.'],
+    ['Promoted to {belt}. Harder numbers from here, obviously.', "{belt}. Don't get comfortable, I've tightened the grading.", 'Up you go: {belt}. New drills, tighter margins.'],
+    ["Promoted: {belt}. Right, no more baby numbers, you've earned the ugly ones.", "{belt}. Bloody hell. Fine, difficulty up.", "{belt}. I've tightened the grading out of spite. Enjoy."],
+  ],
+  fast: [
+    ['Correct and quick. That is the goal.', 'Fast and right. Good.', 'Quick. That matters at a real table.'],
+    ['Quick AND right. Now we are getting somewhere.', "Fast. Good — the clock is part of the game.", 'Snappy. Keep that.'],
+    ['Quick and right. Christ, who are you?', 'Fast. Bloody good. Speed is the whole point.', 'Instant. That is what sharp looks like.'],
+  ],
+  slow: [
+    ['Right, but slow. Speed comes with reps.', 'Correct, eventually. Work on the pace.', 'Right. Now do it faster.'],
+    ["Correct, but I aged. Faster next time.", 'Right, at a glacial pace. Speed it up.', 'Yes — and a real table would have moved on.'],
+    ["Correct, but I grew a beard waiting. Faster.", 'Right, eventually. At a real table they would have called the clock.', 'Yes. Slowly. Painfully. Fix that.'],
   ],
 };
 
@@ -54,17 +83,15 @@ const TEACHING = {
   bluff: 'A bluff of B into P must work B / (P + B) of the time. Bigger bluff, more folds needed.',
   outs: 'Count the cards that actually put you ahead, then rule of 4 on the flop, rule of 2 on the turn.',
   equity: 'Equity is how often you win if the hand goes to showdown right now, with no more betting.',
-  mdf: 'Defend pot / (pot + bet) or the bettor can print money with any two cards.',
-  implied: 'Implied odds only exist if the money is actually behind AND they will actually pay you.',
+  mdf: 'Defend pot / (pot + bet) or the bettor prints money with any two cards.',
+  implied: 'Implied odds only exist if the money is behind AND they will actually pay you.',
 };
 
-/**
- * Pick a line. `rng` is injectable so tests and replays are deterministic.
- */
-export function say(kind, { heat = HEAT.CHEEKY, vars = {}, rng = Math.random } = {}) {
+/** Pick a line. `rng` is injectable so tests and replays are deterministic. */
+export function say(kind, { heat = MOOD.CHEEKY, mood = heat, vars = {}, rng = Math.random } = {}) {
   const tiers = LINES[kind];
   if (!tiers) throw new Error(`Vic has nothing to say about "${kind}"`);
-  const pool = tiers[Math.min(heat, tiers.length - 1)];
+  const pool = tiers[Math.min(Math.max(mood, 0), tiers.length - 1)];
   const line = pool[Math.floor(rng() * pool.length)];
   const filled = line.replace(/\{(\w+)\}/g, (_, key) => (key in vars ? String(vars[key]) : `{${key}}`));
   // Substituted answers like "a pair of aces" often land at the start of a
@@ -77,8 +104,9 @@ export function lesson(topic) {
 }
 
 /**
- * Grade a numeric answer and pick the matching insult.
- * `tolerance` is the "correct" band; 3x is "close", 8x is "wrong", beyond that Vic gets creative.
+ * Grade a numeric answer.
+ * `tolerance` is the "correct" band; 3x is "close", 8x is "wrong", beyond that
+ * Vic gets creative.
  */
 export function grade(given, expected, tolerance) {
   const error = Math.abs(given - expected);

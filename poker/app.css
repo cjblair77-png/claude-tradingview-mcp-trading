@@ -187,3 +187,85 @@ td.num { font-variant-numeric: tabular-nums; font-family: var(--mono); }
   .vic .face { width: 46px; height: 46px; font-size: 21px; }
   .card { width: 38px; height: 54px; }
 }
+
+/* ---------- belt & header ---------- */
+
+.head-right { min-width: 250px; }
+.belt-strip { margin-top: 10px; }
+.belt-line {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 5px;
+}
+#belt-name { color: var(--gold); font-weight: 600; }
+.belt-next { color: var(--ink-dim); font-size: 11px; letter-spacing: 0.06em; text-transform: none; }
+.belt-bar { background: rgba(255,255,255,0.09); }
+.belt-bar > span { background: linear-gradient(90deg, var(--gold), #f3d58a); transition: width 0.45s ease; }
+
+/* ---------- controls row ---------- */
+
+.controls {
+  display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+  margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--line);
+}
+.control { display: inline-flex; align-items: center; gap: 7px; }
+.controls label { font-size: 12px; color: var(--ink-dim); }
+.controls select {
+  background: var(--felt-dark); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 10px; font-family: inherit; font-size: 13px;
+}
+.toggle { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; user-select: none; }
+.toggle input { accent-color: var(--gold); width: 15px; height: 15px; cursor: pointer; }
+button.small { padding: 6px 13px; font-size: 13px; }
+
+.head-tags { display: flex; align-items: center; gap: 10px; }
+.timer {
+  font-family: var(--mono); font-size: 12px; color: var(--ink-dim);
+  background: rgba(0,0,0,0.3); border-radius: 999px; padding: 4px 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- hint ---------- */
+
+.hintbox {
+  margin-top: 14px; padding: 12px 14px; font-size: 14px; line-height: 1.55;
+  background: rgba(224,178,76,0.1); border: 1px solid rgba(224,178,76,0.35);
+  border-left-width: 3px; border-radius: 8px;
+}
+
+/* ---------- the staircase ---------- */
+
+.steps-block { margin: 14px 0; }
+ol.steps { list-style: none; counter-reset: step; margin: 6px 0 0; padding: 0; }
+ol.steps li {
+  counter-increment: step;
+  display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: baseline;
+  padding: 9px 0; border-bottom: 1px solid var(--line);
+  animation: stepIn 0.32s ease both;
+}
+ol.steps li::before {
+  content: counter(step);
+  grid-column: 1;
+  font-family: var(--mono); font-size: 11px; color: #24180a; font-weight: 700;
+  background: var(--gold); border-radius: 50%;
+  width: 20px; height: 20px; display: grid; place-items: center;
+}
+.step-do { font-size: 14px; line-height: 1.5; }
+.step-result {
+  font-family: var(--mono); font-size: 13px; color: var(--gold);
+  text-align: right; white-space: normal; overflow-wrap: anywhere;
+}
+
+@keyframes stepIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  ol.steps li { animation: none; }
+  .belt-bar > span { transition: none; }
+}
+
+@media (max-width: 560px) {
+  .head-right { min-width: 100%; }
+  ol.steps li { grid-template-columns: 22px 1fr; }
+  .step-result { grid-column: 2; text-align: left; }
+}
+
+.answer-row.aux { margin-top: 2px; gap: 8px; }
+.answer-row.aux button { padding: 8px 14px; font-size: 13px; }
