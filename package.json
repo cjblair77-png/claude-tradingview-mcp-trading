@@ -10,7 +10,9 @@
     "gp": "node bot_golden_pocket.js",
     "regime": "node bot_regime_monitor.js",
     "pulse": "node bot_market_pulse.js",
-    "dashboard": "node dashboard_portfolio.js"
+    "dashboard": "node dashboard_portfolio.js",
+    "poker": "node poker/serve.js",
+    "test:poker": "node --test poker/test/*.test.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
